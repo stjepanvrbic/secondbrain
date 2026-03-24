@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "obsidian": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://localhost:${OBSIDIAN_MCP_PORT}/mcp",
+        "--header",
+        "Authorization:Bearer ${OBSIDIAN_API_KEY}"
+      ]
+    }
+  }
+}

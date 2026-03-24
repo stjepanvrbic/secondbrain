@@ -1,0 +1,12 @@
+.DS_Store
+Thumbs.db
+*.plugin
+*.zip
+*.tmp
+.vscode/
+.idea/
+
+# .mcp.json is intentionally NOT ignored — it's the plugin's MCP config
+# and must ship with the plugin for the public install to work.
+# Secrets are referenced via ${OBSIDIAN_API_KEY} env-var substitution,
+# never hardcoded.

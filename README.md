@@ -1,0 +1,221 @@
+# secondbrain
+
+> A persistent, scheduled second brain for Claude Code and Claude Cowork — backed by your own Obsidian vault.
+
+You install the plugin, run `/secondbrain:init`, answer 7 questions, and from that moment on Claude remembers you. Tasks, deadlines, decisions, the people in your life, what you said yesterday. It runs on autopilot — morning briefing at your wakeup time, deadline checks at 1pm, vault maintenance at 2am, weekly review on Sundays. You don't manage the system. The system runs your day and gets out of the way.
+
+This is not "ChatGPT with extra steps." It's an opinionated **memory layer** with a strong point of view: the agent writes everything into a vault you own (plain Markdown, not a SaaS database), reads it at every session start, and never lets information die in conversation.
+
+---
+
+## Who this is for
+
+You want a persistent assistant that **remembers you**, runs your daily routines, and gets smarter the longer you use it. You're willing to spend 20 minutes on initial setup to never have to re-explain your context to Claude again.
+
+You're fine with installing Obsidian (free) as the storage layer. You don't need to be an Obsidian power user — the plugin scaffolds everything for you and the agent maintains it. You'll mostly interact with the system through Claude Code or Cowork, not by editing files in Obsidian. But your data is human-readable Markdown sitting in plain files on your laptop. If Claude Code disappears tomorrow, your data is still yours.
+
+Especially good if you have ADHD, are juggling many projects at once, or just hate context switching.
+
+---
+
+## Quick start — Claude Code
+
+```
+/plugin install stjepanvrbic/secondbrain
+/secondbrain:init
+```
+
+Then follow the prompts. The init skill walks you through:
+- Installing Obsidian (if you don't have it)
+- Installing the Dataview and Local REST API plugins
+- Getting an API key
+- Setting environment variables (it offers to write them to your shell config for you)
+- Scaffolding your vault with starter files
+- Installing 6 scheduled tasks (you can opt out of any)
+- Seeding your profile with 7 conversational questions
+- Picking a sync method
+- Smoke-testing the install
+
+About 15-20 minutes total. Most of it is one-time setup.
+
+## Quick start — Claude Cowork
+
+1. Download [`secondbrain-v2.5.0.zip`](https://github.com/stjepanvrbic/secondbrain/releases/latest) from the GitHub Releases page
+2. Open Claude Desktop, switch to the **Cowork** tab
+3. Click **Customize** → **Browse plugins** → **Upload** → select the ZIP
+4. Click **Install** → **Authorize**
+5. In a new Cowork chat, run: `/secondbrain:init`
+6. After init prints a list of `/schedule` commands, copy each one into the Cowork chat to enable scheduled tasks (Cowork doesn't let plugins create scheduled tasks directly — this manual step is unavoidable for now)
+
+The init skill works the same in Cowork as in Code, except it auto-detects the environment and adapts (uses Cowork's `/schedule` skill instead of Code's `CronCreate` for scheduled tasks).
+
+---
+
+## Prerequisites
+
+- **Claude Code** OR **Claude Cowork** (Claude Desktop with Cowork enabled)
+- **Obsidian** (free) — https://obsidian.md
+- **Dataview plugin** for Obsidian — installable from inside Obsidian, the init skill walks you through it
+- **Local REST API plugin** for Obsidian — same, installable from inside Obsidian
+- ~20 minutes for initial setup
+- An Obsidian vault somewhere on your filesystem (init creates one if you don't have one)
+
+---
+
+## What `/secondbrain:init` does for you
+
+The init skill is a 10-step dummy-proof flow. You don't need to know what an env var, MCP, or shell config is — init walks you through everything and offers to configure things for you (with explicit permission). Here's what happens:
+
+1. **Greet and confirm** — friendly intro, you say "yes" to start
+2. **Detect environment** — figures out Code vs Cowork, branches accordingly
+3. **Prerequisites guided install** — for each missing piece (Obsidian, plugins, API key, env vars), specific click-by-click instructions assuming you've never used Obsidian before
+4. **MCP connection verification** — confirms it can actually talk to your vault
+5. **Vault detection / scaffolding** — creates starter folders and files, or fills in missing pieces if you have an existing vault
+6. **Automatic scheduled task installation** — 6 tasks installed via `CronCreate` in Code or via `/schedule` prompts in Cowork
+7. **Profile seeding** — 7 conversational questions (your name, what you do, your goals, communication preferences, daily rhythm) — answers fill in your `CLAUDE.md` and `me/profile.md`
+8. **Initial dream-protocol run** — builds the vault index, verifies everything
+9. **Sync method choice** — pick how to sync the vault across devices (Obsidian Sync, iCloud, Google Drive, Syncthing, or single-device only)
+10. **Smoke tests + setup complete report** — confirms everything works, prints next steps
+
+**Idempotent:** running `/secondbrain:init` twice is safe. Re-runs detect what's already done and only complete missing pieces.
+
+**Verify mode:** `/secondbrain:init --verify` runs all 13 health checks with no side effects — useful for diagnosing issues without fear of overwriting anything.
+
+---
+
+## First-session checklist
+
+After `/secondbrain:init` finishes, try these:
+
+```
+what's next?              # get your first task — energy-matched, just one
+brain dump: <anything>    # ingest something into the vault
+who am I                  # test knowledge search against your seeded profile
+```
+
+The hooks fire automatically, so as soon as you say something the `session-start` skill loads your context. When you say "bye" or "done", `session-end` flushes everything to the vault. You don't manage the lifecycle — it runs itself.
+
+---
+
+## Bundled scheduled tasks
+
+`init` installs 6 scheduled tasks by default. You can opt out of any during setup, and customize the times:
+
+| Task | Default time | Skill | What it does |
+|---|---|---|---|
+| morning-briefing | 10:30am daily | `morning-brief` | Loads context, processes overnight inbox, builds today's energy-matched plan |
+| deadline-tracker | 1:00pm daily | `deadline-check` | Lightweight midday scan, auto-promotes urgent items |
+| email-triage | 9:00am weekdays | `email-triage` | Reads every unread email, extracts action items (requires Gmail MCP) |
+| end-of-day-capture | 7:30pm daily | `end-of-day` | Reviews day, prompts for brain dump, flushes state |
+| weekly-review | 8:00pm Sundays | `weekly-review` | Full weekly audit, builds next week's plan |
+| dream-protocol | 2:00am daily | `dream-protocol` | Vault maintenance, deadline promotion, manifest rebuild, link repair |
+
+Scheduled tasks only run when Claude Desktop / Code is open and your computer is awake. They don't run on a remote server.
+
+---
+
+## Architecture (brief)
+
+The system has three layers (full details in [ARCHITECTURE.md](ARCHITECTURE.md)):
+
+1. **Schema** (`CLAUDE.md`, `glossary.md`) — static configuration, the agent's personality and routing rules
+2. **Wiki** (`brain/`, `entities/`, `me/`, `log.md`, `_MANIFEST.md`) — the agent-maintained memory layer
+3. **Raw Sources** (`inbox/`, optional `sources/`) — unprocessed input the agent ingests
+
+The agent never modifies the Schema layer (you do). The agent maintains the Wiki layer (you don't directly edit it — you brain-dump into the inbox and the agent routes everything). Two navigation files at the vault root: `_MANIFEST.md` (index + content catalog) and `log.md` (Karpathy-style append-only chronological audit trail).
+
+The architecture borrows the three-layer model from [Andrej Karpathy's gist on personal LLM wikis](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f), with credit and intentional divergences for life-management vs knowledge-management orientation. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full comparison.
+
+---
+
+## Skills
+
+The plugin ships 14 skills. Most run automatically — you rarely invoke them by name.
+
+| Skill | Auto-invoked when |
+|---|---|
+| `init` | You run `/secondbrain:init` (one-time setup) |
+| `doctor` | You run `/secondbrain:doctor` for read-only health checks |
+| `session-start` | First action of every session (via hook) |
+| `session-end` | You signal "done", or SessionEnd hook fires |
+| `ingest` | You paste text, say "brain dump", or session-start finds unprocessed inbox files |
+| `knowledge-search` | You ask about your own context (people, dates, decisions, status) |
+| `whats-next` | You ask "what's next" or start a session without a task |
+| `email-triage` | Scheduled, or you ask to check email |
+| `morning-brief` | Scheduled at your wakeup time |
+| `deadline-check` | Scheduled at 1pm |
+| `end-of-day` | Scheduled at evening shutdown time |
+| `weekly-review` | Scheduled Sunday 8pm |
+| `dream-protocol` | Scheduled 2am |
+| `vault-review` | You ask for a manual audit |
+
+---
+
+## Common issues
+
+### "OBSIDIAN_MCP_PORT is not set" / MCP can't connect
+
+The plugin's `.mcp.json` references `${OBSIDIAN_MCP_PORT}` (and `${OBSIDIAN_API_KEY}`). Both must be set in your shell environment before Claude Code/Cowork starts. Run `/secondbrain:init` and it'll walk you through setting them. Or set them manually:
+
+```bash
+echo 'export OBSIDIAN_API_KEY="<your-key>"' >> ~/.zshrc
+echo 'export OBSIDIAN_MCP_PORT="27124"' >> ~/.zshrc  # or your actual port
+source ~/.zshrc
+```
+
+Then restart Claude Code/Cowork.
+
+### "Cowork can't see my vault"
+
+Cowork is sandboxed — it can only access folders listed in `localAgentModeTrustedFolders` in `~/Library/Application Support/Claude/claude_desktop_config.json`. Add your vault path to that array, then quit and reopen Claude Desktop.
+
+### "Scheduled tasks aren't running in Cowork"
+
+Cowork's scheduled tasks only run when Claude Desktop is open AND your computer is awake. If you close your laptop overnight, the 2am dream-protocol won't fire — it'll run the next time Claude Desktop is open. This is a Cowork limitation, not a plugin bug.
+
+### "I want to install the plugin in Cowork but `/plugin install` doesn't work"
+
+Cowork doesn't support direct GitHub install for individual users — only organization marketplaces do. Use the manual ZIP upload flow described in "Quick start — Claude Cowork" above.
+
+### "Something is broken and I don't know what"
+
+Run `/secondbrain:doctor` — it runs 14 read-only checks and tells you exactly what's failing and how to fix each one.
+
+### "I want to start over"
+
+Delete `~/.secondbrain-installed` (the marker file) and run `/secondbrain:init` again. The init skill will detect this as a fresh install and walk through the full flow. Your existing vault is left untouched unless you explicitly tell init to scaffold a new one.
+
+---
+
+## Documentation
+
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — three-layer model, core operations, navigation files, Karpathy comparison, full skill catalog
+- **[SYNC.md](SYNC.md)** — vault sync setup for 5 different methods
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to clone, test, and submit PRs
+
+---
+
+## Privacy
+
+The plugin runs **entirely on your machine**. No data leaves your laptop except:
+- LLM API calls to Anthropic (the same calls you make in any Claude Code / Cowork session)
+- Whatever your Obsidian sync configuration does (Obsidian Sync, iCloud, Google Drive, Syncthing — see [SYNC.md](SYNC.md))
+
+The plugin itself sends nothing. There's no telemetry, no analytics, no remote calls. The vault is your data, on your filesystem, encrypted at rest by your OS.
+
+The one ambient leak vector is Anthropic's LLM API: every time the agent reads a vault file, the contents are part of the prompt sent to the model. If you're storing things you don't want Anthropic to ever see, don't put them in the vault.
+
+---
+
+## License
+
+MIT. See [LICENSE](LICENSE) for full text.
+
+---
+
+## Credits
+
+- [Andrej Karpathy's gist on personal LLM wikis](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — three-layer model and index/log navigation pattern
+- [Obsidian](https://obsidian.md) and the [Local REST API plugin](https://github.com/coddingtonbear/obsidian-local-rest-api) — vault storage and MCP bridge
+- [Dataview](https://blacksmithgu.github.io/obsidian-dataview/) — DQL query layer
+- The Claude Code and Claude Cowork teams at Anthropic for the plugin and skill systems
