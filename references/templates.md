@@ -69,15 +69,14 @@ Replace/append in `brain/status.md`:
 **Status:** on-track | needs-attention | blocked
 ```
 
-### Inbox Processed Frontmatter
+### Inbox Processing
 
-Add to inbox file after processing:
+After processing an inbox file, move it to `archive/inbox/`:
 
-```yaml
-processed: true
-processed-date: YYYY-MM-DDTHH:MM:SS
-source: inbox-sweep | session-ingest
-```
+1. Route all content from the inbox file to vault destinations (status.md, decisions.md, entities, etc.)
+2. Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py ${VAULT_PATH}` to move processed files to `archive/inbox/`
+3. NEVER modify the original inbox file in place
+4. NEVER delete inbox files
 
 ### log.md Entry (Karpathy-style append-only chronological log)
 
@@ -94,13 +93,13 @@ Append to the end of `log.md` (NEVER prepend, NEVER edit existing entries):
 
 ```markdown
 ## [2026-04-09 10:35] ingest | Brain dump from this morning
-Routed 3 tasks to commitments, created entities/jane-doe, updated brain/status with new blocker.
+Routed 3 tasks to status, created entities/jane-doe, updated brain/status with new blocker.
 
 ## [2026-04-09 02:00] dream-protocol | Run #22
 Processed 0 inbox items, promoted 1 deadline, fixed 4 wikilinks, rebuilt manifest content catalog.
 
 ## [2026-04-09 19:30] session-end | Triage + planning session
-Closed 2 commitments, added 1 decision (move-in date), flagged 1 blocker on financing.
+Closed 2 tasks, added 1 decision (move-in date), flagged 1 blocker on financing.
 ```
 
 **Why this format:**
@@ -132,28 +131,9 @@ Not set — run session-start to begin.
 None identified.
 ```
 
-### brain/commitments.md
+### brain/commitments.md (DEPRECATED)
 
-```markdown
----
-type: commitments
-updated: [TODAY]
----
-
-# Commitments
-
-## URGENT (This Week)
-
-## This Week
-
-## Ongoing
-
-## Waiting On
-
-## Someday
-
-## Done (Recent)
-```
+> DEPRECATED: commitments.md has been replaced by brain/status.md as the single source of truth for tasks. Do not create new commitments.md files. Existing ones are archived.
 
 ### brain/deadlines.md
 

@@ -53,7 +53,7 @@ READ brain/session-log.md (entries since last dream run only)
 
 Scan each session entry for:
 
-- **Unprocessed TODOs and action items** — tasks mentioned but not yet in brain/commitments.md
+- **Unprocessed TODOs and action items** — tasks mentioned but not yet in brain/status.md
 - **Decisions made** — choices, conclusions, or direction changes that should be in brain/decisions.md
 - **New entities mentioned** — people, companies, tools, concepts referenced but without an entities/ file
 - **Context and insights** — observations, learnings, or status updates worth persisting to the relevant vault file
@@ -64,7 +64,7 @@ Collect all extracted signal into a working list for Phase 3 processing.
 ### 2.3 Stale Tasks
 
 ```
-DQL: TASK FROM "brain/commitments" WHERE !done AND (date(today) - file.mtime) > dur(14 days)
+DQL: TASK FROM "brain/status" WHERE !done AND (date(today) - file.mtime) > dur(14 days)
 ```
 
 Note: also cross-reference with brain/status.md for recent activity mentions — a task may appear stale by file modification but was discussed recently.
@@ -72,7 +72,7 @@ Note: also cross-reference with brain/status.md for recent activity mentions —
 ### 2.4 Deadline Proximity
 
 ```
-DQL: TASK FROM "brain/commitments" WHERE due AND (due - date(today)) <= dur(7 days) AND !done
+DQL: TASK FROM "brain/status" WHERE due AND (due - date(today)) <= dur(7 days) AND !done
 ```
 
 Check whether each result is already in the "Urgent This Week" section. Flag those that are not for promotion in Phase 3.
@@ -80,7 +80,7 @@ Check whether each result is already in the "Urgent This Week" section. Flag tho
 ### 2.5 Archive Candidates
 
 ```
-DQL: TASK FROM "brain/commitments" WHERE done AND (date(today) - done) > dur(7 days)
+DQL: TASK FROM "brain/status" WHERE done AND (date(today) - done) > dur(7 days)
 ```
 
 ### 2.6 Broken Links & Orphans
@@ -110,7 +110,7 @@ Process everything gathered in Phase 2. Each procedure below corresponds to sign
 FOR each unprocessed file in inbox/:
   1. Read file contents
   2. Route content using ingest routing rules:
-     - Tasks       → brain/commitments.md
+     - Tasks       → brain/status.md
      - Ideas       → scratch/ideas.md
      - Decisions   → brain/decisions.md
      - Entities    → entities/{name}.md (use template from @${CLAUDE_PLUGIN_ROOT}/references/templates.md)
@@ -130,7 +130,7 @@ ENDFOR
 
 ```
 FOR each signal item extracted in Phase 2.2:
-  - TODOs/action items → route to brain/commitments.md (appropriate section)
+  - TODOs/action items → route to brain/status.md (appropriate section)
   - Decisions → append to brain/decisions.md with date and context
   - New entities → create entity file from template (@${CLAUDE_PLUGIN_ROOT}/references/templates.md)
   - Context/insights → append to the relevant vault file (domain index, entity, or status)
@@ -210,7 +210,7 @@ ENDFOR
 FOR each task flagged in Phase 2.5:
   1. MOVE task to archive/completed-tasks-YYYY-MM.md (monthly archive)
   2. Keep [done::] timestamp in archive
-  3. Remove from active commitments.md
+  3. Remove from active status.md
 ENDFOR
 ```
 
@@ -220,8 +220,8 @@ ENDFOR
 REFRESH brain/status.md:
   1. Clear stale "Last Ingest" section
   2. Update "Current Focus" based on last session log
-  3. Extract "Urgent This Week" count from commitments.md
-  4. Extract blockers from commitments.md [blocked-by::] fields
+  3. Extract "Urgent This Week" count from status.md
+  4. Extract blockers from status.md [blocked-by::] fields
   5. List files modified since last dream run (vault activity)
   6. Note stale tasks flagged in 3.4
   7. Note deadline promotions from 3.3
@@ -249,7 +249,7 @@ Format:
 FOR each domain folder ({domain}):
   1. READ {domain}/index.md
   2. IF type == "project":
-     a. Count tasks in brain/commitments.md tagged #domain
+     a. Count tasks in brain/status.md tagged #domain
      b. Count DONE tasks from that #domain
      c. IF all tasks done (or all moved to archive):
         - FLAG: "[[domain-name]] ready for archiving?"
@@ -289,7 +289,7 @@ Dream protocol is NOT complete until this passes.
 
 Run the verification script:
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/dream-protocol/scripts/verify-vault.py "${VAULT_PATH:-$HOME/vault}" --json
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "${VAULT_PATH:-$HOME/vault}" --json
 ```
 
 Parse the JSON output. For each issue found:
@@ -342,7 +342,7 @@ REBUILD _MANIFEST.md with the following structure:
 ## File Tree
 
 - brain/
-  - commitments.md
+  - status.md
   - decisions.md
   - session-log.md
   - status.md

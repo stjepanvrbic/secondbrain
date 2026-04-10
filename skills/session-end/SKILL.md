@@ -19,6 +19,10 @@ metadata:
 2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
 3. For content templates, read `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`.
 
+# Pre-Conditions (verify before executing)
+- Read current brain/status.md BEFORE writing to detect existing sections
+- Before appending "Last Session Summary", check if one already exists for today. If so, REPLACE it, don't append a duplicate.
+
 # Execution Steps (in order)
 
 ## 1. Update brain/status.md
@@ -81,14 +85,12 @@ Keep to 1-3 bullet points per section. Always cite with [[wikilinks]]. No narrat
 
 ```
 FOR each file in inbox/:
-  IF file lacks [processed:: true] frontmatter:
-    FLAG: "Unprocessed inbox item for next session: [filename]"
-    ADD to brain/status.md "Inbox pending" section
-  ENDIF
+  FLAG: "Unprocessed inbox item for next session: [filename]"
+  ADD to brain/status.md "Inbox pending" section
 ENDFOR
 ```
 
-Do NOT process files now. Simply note them so next session starts aware. FORBIDDEN: Deleting inbox files.
+Do NOT process files now. Simply note them so next session starts aware. FORBIDDEN: Modifying or deleting inbox files.
 
 ## 5. Append to log.md (Karpathy-style chronological log)
 
@@ -103,8 +105,19 @@ This is **append-only** — never edit existing entries. Format details in `@${C
 
 The richer session details still go in `brain/session-log.md` (step 3 above). `log.md` is the lightweight greppable index across ALL operations, not just sessions.
 
+# Post-Write Validation
+After ALL writes are complete:
+1. Run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} --modified-only [files-you-touched] --json`
+2. If errors found (missing entities, broken links), fix immediately
+3. For missing entities: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py ${VAULT_PATH} entity-name`
+4. Do NOT mark the operation as complete until validation passes
+
 # Error Handling
 
+- vault_patch fails -> read current file state, re-plan the edit, retry once
+- Entity doesn't exist -> create stub via scripts/create_entity_stubs.py
+- DQL query returns empty -> fall back to vault_search, then vault_list
+- Never mark operation complete if validation failed
 - If brain/status.md missing: create minimal with session summary
 - If brain/session-log.md missing: create new
 - If wikilinks broken: add them anyway

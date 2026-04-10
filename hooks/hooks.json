@@ -20,5 +20,17 @@
         }
       ]
     }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "mcp__obsidian__vault_(create|update|patch|edit)",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "${CLAUDE_PLUGIN_ROOT}/hooks/validate-after-write.sh",
+          "timeout": 30
+        }
+      ]
+    }
   ]
 }

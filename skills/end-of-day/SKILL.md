@@ -32,7 +32,7 @@ Match intensity to the day:
 - **Light day** (few tasks): "Quick check-in — anything to capture from today?"
 
 If user responds with a brain dump, process it via ingest routing:
-- Tasks → brain/commitments.md
+- Tasks → brain/status.md
 - Decisions → brain/decisions.md
 - Entity info → entities/{name}.md
 - Ideas → scratch/ideas.md

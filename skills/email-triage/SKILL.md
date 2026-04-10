@@ -53,7 +53,7 @@ Be careful — don't gloss over emails. Missing an important email can be disast
    d. ACT on the categorization (see below)
 
 4. For URGENT and IMPORTANT emails — FULLY INGEST all signal:
-   a. Tasks/action items → brain/commitments.md with full metadata
+   a. Tasks/action items → brain/status.md with full metadata
    b. Deadlines/dates mentioned → brain/deadlines.md with [due::] fields
    c. Decisions or agreements → brain/decisions.md as atomic section
    d. New people, companies, contacts → create entities/{name}.md
@@ -113,7 +113,7 @@ All windows must end with zero unread emails.
 Brief summary only:
 ```
 Email triage done — 0 unread remaining.
-Action items: 3 added to commitments.
+Action items: 3 added to status.
 Labeled important: 7 emails.
 Archived: 12 emails.
 Urgent: Follow up with [[entities/mmh]] on LCA status (due tomorrow).
@@ -123,7 +123,7 @@ Urgent: Follow up with [[entities/mmh]] on LCA status (due tomorrow).
 
 - **Gmail MCP unavailable**: Note that email triage requires Gmail access, suggest user check connection
 - **Unknown sender with action item**: Create minimal entity file, flag for review
-- **Duplicate action item**: Check commitments.md before adding, skip if already exists
+- **Duplicate action item**: Check status.md before adding, skip if already exists
 - **Ambiguous urgency**: Default to IMPORTANT, not URGENT
 
 # Implementation Notes

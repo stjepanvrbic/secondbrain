@@ -23,12 +23,12 @@ Build and present an energy-matched day plan. Load context, process overnight in
 
 ## 1. Load Context
 
-Read brain/status.md, brain/commitments.md (all open tasks), brain/goals.md, brain/battle-plan-milestones.md, and me/energy.md. Use DQL queries to get urgent/upcoming tasks efficiently.
+Read brain/status.md (all open tasks), brain/goals.md, brain/battle-plan-milestones.md, and me/energy.md. Use DQL queries to get urgent/upcoming tasks efficiently.
 
 ## 2. Process Overnight Inbox
 
 If unprocessed inbox files exist, route them to vault using ingest rules:
-- Tasks → brain/commitments.md with full metadata + [[wikilinks]]
+- Tasks → brain/status.md with full metadata + [[wikilinks]]
 - Decisions → brain/decisions.md
 - Entity info → entities/{name}.md
 - Mark processed in frontmatter. NEVER delete inbox files.

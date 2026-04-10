@@ -5,6 +5,10 @@ Thumbs.db
 *.tmp
 .vscode/
 .idea/
+__pycache__/
+.pytest_cache/
+*.pyc
+excalidraw.log
 
 # .mcp.json is intentionally NOT ignored — it's the plugin's MCP config
 # and must ship with the plugin for the public install to work.

@@ -1,0 +1,674 @@
+#!/usr/bin/env python3
+"""
+init_obsidian.py — Automated Obsidian setup for secondbrain.
+
+Detects platform, installs Obsidian if missing, installs required plugins,
+configures MCP connection, and scaffolds vault structure. The user should
+barely need to do anything.
+
+Python 3.8+, zero external dependencies.
+
+Usage:
+    python3 init_obsidian.py                          # full auto
+    python3 init_obsidian.py --vault-path ~/my-vault  # specify vault
+    python3 init_obsidian.py --skip-install            # skip Obsidian install
+    python3 init_obsidian.py --dry-run                 # show what would happen
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import platform
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from datetime import date
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+
+# ---------------------------------------------------------------------------
+# Platform detection
+# ---------------------------------------------------------------------------
+
+def detect_platform() -> str:
+    """Return 'macos', 'linux', or 'windows'. WSL returns 'linux'."""
+    s = platform.system().lower()
+    if s == "darwin":
+        return "macos"
+    if s == "linux":
+        return "linux"  # WSL reports as Linux — treat it as Linux
+    if s == "windows":
+        return "windows"
+    return "linux"
+
+
+def is_wsl() -> bool:
+    """Detect if running inside Windows Subsystem for Linux."""
+    try:
+        release = Path("/proc/version").read_text().lower()
+        return "microsoft" in release or "wsl" in release
+    except OSError:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Obsidian detection and installation
+# ---------------------------------------------------------------------------
+
+OBSIDIAN_PATHS = {
+    "macos": [Path("/Applications/Obsidian.app")],
+    "linux": [
+        Path("/usr/bin/obsidian"),
+        Path("/snap/bin/obsidian"),
+        Path.home() / "AppImage" / "Obsidian.AppImage",
+        Path.home() / ".local/bin/obsidian",
+    ],
+    "windows": [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Obsidian" / "Obsidian.exe",
+        Path(os.environ.get("PROGRAMFILES", "")) / "Obsidian" / "Obsidian.exe",
+    ],
+}
+
+OBSIDIAN_CONFIG_PATHS = {
+    "macos": Path.home() / "Library" / "Application Support" / "obsidian",
+    "linux": Path.home() / ".config" / "obsidian",
+    "windows": Path(os.environ.get("APPDATA", "")) / "obsidian",
+}
+
+
+def find_obsidian(plat: str) -> Optional[Path]:
+    """Find Obsidian installation path, or None."""
+    for p in OBSIDIAN_PATHS.get(plat, []):
+        if p.exists():
+            return p
+    # Also try 'which' / 'where' as fallback
+    cmd = "where.exe" if plat == "windows" else "which"
+    try:
+        result = subprocess.run([cmd, "obsidian"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and result.stdout.strip():
+            return Path(result.stdout.strip().splitlines()[0])
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+def install_obsidian(plat: str, dry_run: bool = False) -> bool:
+    """Install Obsidian. Returns True on success."""
+    commands = {
+        "macos": ["brew", "install", "--cask", "obsidian"],
+        "linux": ["snap", "install", "obsidian", "--classic"],
+        "windows": ["winget", "install", "--id", "Obsidian.Obsidian", "--accept-source-agreements", "--accept-package-agreements"],
+    }
+
+    # Check if package manager exists
+    pkg_managers = {"macos": "brew", "linux": "snap", "windows": "winget"}
+    mgr = pkg_managers.get(plat, "")
+    which_cmd = "where.exe" if plat == "windows" else "which"
+
+    try:
+        r = subprocess.run([which_cmd, mgr], capture_output=True, timeout=5)
+        if r.returncode != 0:
+            # Try apt for Linux if snap not available
+            if plat == "linux":
+                r2 = subprocess.run(["which", "apt"], capture_output=True, timeout=5)
+                if r2.returncode == 0:
+                    commands["linux"] = ["sudo", "apt", "install", "-y", "obsidian"]
+                else:
+                    print(f"  No package manager found ({mgr}, apt). Install Obsidian manually.")
+                    return False
+            else:
+                print(f"  Package manager '{mgr}' not found. Install Obsidian manually.")
+                return False
+    except (OSError, subprocess.TimeoutExpired):
+        print(f"  Cannot check for '{mgr}'. Install Obsidian manually.")
+        return False
+
+    cmd = commands.get(plat, [])
+    if not cmd:
+        print(f"  No install command for platform '{plat}'.")
+        return False
+
+    if dry_run:
+        print(f"  WOULD RUN: {' '.join(cmd)}")
+        return True
+
+    print(f"  Installing Obsidian: {' '.join(cmd)}")
+    try:
+        result = subprocess.run(cmd, timeout=300)
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"  Install failed: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Vault detection
+# ---------------------------------------------------------------------------
+
+def find_existing_vaults(plat: str) -> List[Tuple[str, Path]]:
+    """Find existing Obsidian vaults from obsidian.json config."""
+    config_dir = OBSIDIAN_CONFIG_PATHS.get(plat)
+    if not config_dir:
+        return []
+
+    obsidian_json = config_dir / "obsidian.json"
+    if not obsidian_json.exists():
+        return []
+
+    try:
+        data = json.loads(obsidian_json.read_text(encoding="utf-8"))
+        vaults = data.get("vaults", {})
+        results = []
+        for _vault_id, info in vaults.items():
+            vault_path = Path(info.get("path", ""))
+            if vault_path.is_dir():
+                # Try to get vault name from path
+                results.append((vault_path.name, vault_path))
+        return results
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def default_vault_path() -> Path:
+    return Path.home() / "secondbrain-vault"
+
+
+# ---------------------------------------------------------------------------
+# Plugin installation
+# ---------------------------------------------------------------------------
+
+PLUGINS = {
+    "dataview": {
+        "repo": "blacksmithgu/obsidian-dataview",
+        "id": "dataview",
+    },
+    "local-rest-api": {
+        "repo": "coddingtonbear/obsidian-local-rest-api",
+        "id": "obsidian-local-rest-api",
+    },
+}
+
+GITHUB_API = "https://api.github.com/repos/{repo}/releases/latest"
+
+
+def fetch_latest_release(repo: str) -> Optional[Dict[str, Any]]:
+    """Fetch latest release info from GitHub."""
+    url = GITHUB_API.format(repo=repo)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "secondbrain-init"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode())
+    except (urllib.error.URLError, json.JSONDecodeError, OSError) as e:
+        print(f"  Failed to fetch release from {repo}: {e}")
+        return None
+
+
+def download_file(url: str, dest: Path) -> bool:
+    """Download a file from URL to dest."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "secondbrain-init"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            dest.write_bytes(resp.read())
+        return True
+    except (urllib.error.URLError, OSError) as e:
+        print(f"  Download failed: {e}")
+        return False
+
+
+def install_plugin(vault_path: Path, plugin_name: str, plugin_info: Dict, dry_run: bool = False) -> bool:
+    """Install an Obsidian plugin into the vault's .obsidian/plugins/ directory."""
+    plugin_id = plugin_info["id"]
+    plugin_dir = vault_path / ".obsidian" / "plugins" / plugin_id
+
+    if plugin_dir.exists() and (plugin_dir / "main.js").exists():
+        print(f"  {plugin_name}: already installed")
+        return True
+
+    if dry_run:
+        print(f"  WOULD INSTALL plugin: {plugin_name} ({plugin_id})")
+        return True
+
+    release = fetch_latest_release(plugin_info["repo"])
+    if not release:
+        return False
+
+    # Find the required assets
+    assets = {a["name"]: a["browser_download_url"] for a in release.get("assets", [])}
+    required = ["main.js", "manifest.json"]
+    optional = ["styles.css"]
+
+    for filename in required:
+        if filename not in assets:
+            print(f"  {plugin_name}: missing required asset '{filename}' in release")
+            return False
+
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+
+    for filename in required + optional:
+        if filename in assets:
+            dest = plugin_dir / filename
+            print(f"  Downloading {plugin_name}/{filename}...")
+            if not download_file(assets[filename], dest):
+                return False
+
+    print(f"  {plugin_name}: installed successfully")
+    return True
+
+
+def enable_plugins(vault_path: Path, plugin_ids: List[str], dry_run: bool = False) -> None:
+    """Add plugins to .obsidian/community-plugins.json."""
+    plugins_file = vault_path / ".obsidian" / "community-plugins.json"
+
+    existing: List[str] = []
+    if plugins_file.exists():
+        try:
+            existing = json.loads(plugins_file.read_text())
+        except json.JSONDecodeError:
+            pass
+
+    updated = list(existing)
+    for pid in plugin_ids:
+        if pid not in updated:
+            updated.append(pid)
+
+    if updated == existing:
+        return
+
+    if dry_run:
+        print(f"  WOULD UPDATE community-plugins.json: {updated}")
+        return
+
+    plugins_file.parent.mkdir(parents=True, exist_ok=True)
+    plugins_file.write_text(json.dumps(updated, indent=2))
+    print(f"  Enabled plugins: {updated}")
+
+
+# ---------------------------------------------------------------------------
+# REST API configuration
+# ---------------------------------------------------------------------------
+
+DEFAULT_REST_PORT = 27124
+
+
+def configure_rest_api(vault_path: Path, dry_run: bool = False) -> Tuple[Optional[int], Optional[str]]:
+    """Configure Local REST API plugin and return (port, api_key) if found."""
+    config_path = vault_path / ".obsidian" / "plugins" / "obsidian-local-rest-api" / "data.json"
+
+    if config_path.exists():
+        try:
+            data = json.loads(config_path.read_text())
+            port = data.get("port", DEFAULT_REST_PORT)
+            api_key = data.get("apiKey") or data.get("api_key")
+            if api_key:
+                print(f"  REST API config found: port={port}")
+                return port, api_key
+        except json.JSONDecodeError:
+            pass
+
+    # Write default config if missing
+    if dry_run:
+        print(f"  WOULD WRITE default REST API config (port={DEFAULT_REST_PORT})")
+        return DEFAULT_REST_PORT, None
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    default_config = {"port": DEFAULT_REST_PORT, "crypto": True}
+    config_path.write_text(json.dumps(default_config, indent=2))
+    print(f"  Wrote default REST API config (port={DEFAULT_REST_PORT})")
+    print("  NOTE: API key will be generated when Obsidian starts. Re-run init after opening Obsidian.")
+    return DEFAULT_REST_PORT, None
+
+
+# ---------------------------------------------------------------------------
+# Environment variable configuration
+# ---------------------------------------------------------------------------
+
+SHELL_CONFIGS = {
+    "zsh": Path.home() / ".zshrc",
+    "bash": Path.home() / ".bashrc",
+    "fish": Path.home() / ".config" / "fish" / "config.fish",
+}
+
+ENV_VAR_RE = re.compile(r"^export\s+(OBSIDIAN_API_KEY|OBSIDIAN_MCP_PORT)=", re.MULTILINE)
+FISH_VAR_RE = re.compile(r"^set\s+-gx\s+(OBSIDIAN_API_KEY|OBSIDIAN_MCP_PORT)\s+", re.MULTILINE)
+
+
+def detect_shell() -> str:
+    """Detect current shell."""
+    shell = os.environ.get("SHELL", "")
+    if "fish" in shell:
+        return "fish"
+    if "zsh" in shell:
+        return "zsh"
+    if "bash" in shell:
+        return "bash"
+    # Windows: check for PowerShell profile
+    if detect_platform() == "windows":
+        return "powershell"
+    return "bash"
+
+
+def set_env_vars(port: int, api_key: Optional[str], shell: str, dry_run: bool = False) -> bool:
+    """Append env vars to shell config file."""
+    if shell == "powershell":
+        return _set_env_vars_powershell(port, api_key, dry_run)
+
+    config_file = SHELL_CONFIGS.get(shell)
+    if not config_file:
+        print(f"  Unknown shell '{shell}'. Set these manually:")
+        _print_manual_env(port, api_key)
+        return False
+
+    if shell == "fish":
+        lines = [f"set -gx OBSIDIAN_MCP_PORT {port}"]
+        if api_key:
+            lines.append(f"set -gx OBSIDIAN_API_KEY {api_key}")
+        var_re = FISH_VAR_RE
+    else:
+        lines = [f'export OBSIDIAN_MCP_PORT="{port}"']
+        if api_key:
+            lines.append(f'export OBSIDIAN_API_KEY="{api_key}"')
+        var_re = ENV_VAR_RE
+
+    # Check if already set
+    if config_file.exists():
+        content = config_file.read_text()
+        existing = set(var_re.findall(content))
+        lines = [l for l in lines if not any(v in l for v in existing)]
+
+    if not lines:
+        print("  Environment variables already set")
+        return True
+
+    if dry_run:
+        print(f"  WOULD APPEND to {config_file}:")
+        for line in lines:
+            print(f"    {line}")
+        return True
+
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    with config_file.open("a") as f:
+        f.write(f"\n# secondbrain — Obsidian MCP connection\n")
+        for line in lines:
+            f.write(line + "\n")
+
+    print(f"  Appended to {config_file}")
+    return True
+
+
+def _set_env_vars_powershell(port: int, api_key: Optional[str], dry_run: bool = False) -> bool:
+    """Set env vars for Windows via PowerShell profile or setx."""
+    cmds = [f'[Environment]::SetEnvironmentVariable("OBSIDIAN_MCP_PORT", "{port}", "User")']
+    if api_key:
+        cmds.append(f'[Environment]::SetEnvironmentVariable("OBSIDIAN_API_KEY", "{api_key}", "User")')
+
+    if dry_run:
+        print("  WOULD SET Windows environment variables:")
+        for cmd in cmds:
+            print(f"    {cmd}")
+        return True
+
+    for cmd in cmds:
+        try:
+            subprocess.run(["powershell", "-Command", cmd], timeout=10, check=True)
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"  Failed to set env var: {e}")
+            return False
+
+    print("  Windows environment variables set (user scope)")
+    return True
+
+
+def _print_manual_env(port: int, api_key: Optional[str]) -> None:
+    print(f"  OBSIDIAN_MCP_PORT={port}")
+    if api_key:
+        print(f"  OBSIDIAN_API_KEY={api_key}")
+
+
+# ---------------------------------------------------------------------------
+# Vault scaffolding
+# ---------------------------------------------------------------------------
+
+REQUIRED_DIRS = ["brain", "entities", "me", "inbox", "archive", "archive/inbox", "scratch"]
+
+CRITICAL_FILES = {
+    "brain/status.md": "---\nupdated: {date}\n---\n# Status\n\n## Current Focus\n\n_No focus set yet._\n",
+    "brain/deadlines.md": "# Deadlines\n\n_No deadlines tracked yet._\n",
+    "brain/goals.md": "# Goals\n\n_No goals set yet._\n",
+    "brain/decisions.md": "# Decisions\n\n_No decisions recorded yet._\n",
+    "brain/session-log.md": "# Session Log\n",
+    "me/profile.md": "# Profile\n\n_Run /secondbrain:init to seed your profile._\n",
+    "glossary.md": "# Glossary\n\n_Add terms and acronyms here._\n",
+    "log.md": f"# Log\n\n## [{date.today().isoformat()} 00:00] init | Vault created\nInitial vault scaffolding.\n",
+    "_MANIFEST.md": "# Vault Manifest\n\n**Files:** 0\n**Last updated:** {date}\n",
+}
+
+
+def scaffold_vault(vault_path: Path, dry_run: bool = False) -> int:
+    """Create vault structure. Returns count of created items. Never overwrites."""
+    created = 0
+    today = date.today().isoformat()
+
+    for d in REQUIRED_DIRS:
+        dir_path = vault_path / d
+        if not dir_path.exists():
+            if dry_run:
+                print(f"  WOULD CREATE dir: {d}/")
+            else:
+                dir_path.mkdir(parents=True, exist_ok=True)
+            created += 1
+
+    for filename, template in CRITICAL_FILES.items():
+        file_path = vault_path / filename
+        if not file_path.exists():
+            content = template.replace("{date}", today)
+            if dry_run:
+                print(f"  WOULD CREATE file: {filename}")
+            else:
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_text(content)
+            created += 1
+
+    # Ensure .obsidian directory exists
+    obsidian_dir = vault_path / ".obsidian"
+    if not obsidian_dir.exists():
+        if dry_run:
+            print("  WOULD CREATE dir: .obsidian/")
+        else:
+            obsidian_dir.mkdir(parents=True, exist_ok=True)
+
+    return created
+
+
+# ---------------------------------------------------------------------------
+# Verification
+# ---------------------------------------------------------------------------
+
+def run_verify(vault_path: Path) -> Optional[Dict]:
+    """Run verify_vault.py and return summary."""
+    script = Path(__file__).parent / "verify_vault.py"
+    if not script.exists():
+        return None
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script), str(vault_path), "--json", "--quiet"],
+            capture_output=True, text=True, timeout=30,
+        )
+        return json.loads(result.stdout).get("summary", {})
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        return None
+
+
+def run_rebuild_manifest(vault_path: Path, dry_run: bool = False) -> bool:
+    """Run rebuild_manifest.py."""
+    script = Path(__file__).parent / "rebuild_manifest.py"
+    if not script.exists():
+        return False
+    if dry_run:
+        print("  WOULD RUN: rebuild_manifest.py")
+        return True
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script), str(vault_path)],
+            capture_output=True, text=True, timeout=15,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Main orchestration
+# ---------------------------------------------------------------------------
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="Automated Obsidian setup for secondbrain")
+    p.add_argument("--vault-path", type=Path, help="Path to vault (default: auto-detect or ~/secondbrain-vault)")
+    p.add_argument("--skip-install", action="store_true", help="Skip Obsidian installation")
+    p.add_argument("--dry-run", action="store_true", help="Show what would happen without making changes")
+    return p
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = build_parser().parse_args(argv)
+    dry_run = args.dry_run
+    results: Dict[str, Any] = {"steps": [], "errors": []}
+
+    print("=" * 50)
+    print("  secondbrain — Automated Setup")
+    print("=" * 50)
+
+    # Step 1: Detect platform
+    plat = detect_platform()
+    wsl = is_wsl()
+    print(f"\n[1/7] Platform: {plat}" + (" (WSL)" if wsl else ""))
+    results["platform"] = plat
+    results["wsl"] = wsl
+
+    # Step 2: Find or install Obsidian
+    print(f"\n[2/7] Obsidian")
+    obsidian_path = find_obsidian(plat)
+    if obsidian_path:
+        print(f"  Found: {obsidian_path}")
+        results["steps"].append("obsidian: found")
+    elif args.skip_install:
+        print("  Not found (--skip-install, skipping)")
+        results["steps"].append("obsidian: skipped")
+    else:
+        print("  Not found — installing...")
+        if install_obsidian(plat, dry_run):
+            results["steps"].append("obsidian: installed")
+        else:
+            results["errors"].append("obsidian: install failed")
+            print("  Install Obsidian manually: https://obsidian.md/download")
+
+    # Step 3: Detect or create vault
+    print(f"\n[3/7] Vault")
+    vault_path = args.vault_path
+    if vault_path:
+        vault_path = vault_path.expanduser().resolve()
+        print(f"  Using specified path: {vault_path}")
+    else:
+        existing = find_existing_vaults(plat)
+        if existing:
+            print(f"  Found existing vault(s):")
+            for name, path in existing:
+                print(f"    - {name}: {path}")
+            vault_path = existing[0][1]
+            print(f"  Using: {vault_path}")
+        else:
+            vault_path = default_vault_path()
+            print(f"  No existing vaults found. Using default: {vault_path}")
+
+    if not vault_path.exists():
+        if dry_run:
+            print(f"  WOULD CREATE vault directory: {vault_path}")
+        else:
+            vault_path.mkdir(parents=True, exist_ok=True)
+            print(f"  Created vault directory: {vault_path}")
+
+    results["vault_path"] = str(vault_path)
+
+    # Step 4: Scaffold vault structure
+    print(f"\n[4/7] Scaffold vault")
+    created = scaffold_vault(vault_path, dry_run)
+    if created:
+        print(f"  Created {created} items")
+        results["steps"].append(f"scaffold: {created} items")
+    else:
+        print("  All directories and files already exist")
+        results["steps"].append("scaffold: already complete")
+
+    # Step 5: Install plugins
+    print(f"\n[5/7] Plugins")
+    plugin_ids = []
+    for name, info in PLUGINS.items():
+        ok = install_plugin(vault_path, name, info, dry_run)
+        plugin_ids.append(info["id"])
+        if ok:
+            results["steps"].append(f"plugin {name}: ok")
+        else:
+            results["errors"].append(f"plugin {name}: failed")
+
+    enable_plugins(vault_path, plugin_ids, dry_run)
+
+    # Step 6: Configure MCP connection
+    print(f"\n[6/7] MCP connection")
+    port, api_key = configure_rest_api(vault_path, dry_run)
+
+    shell = detect_shell()
+    print(f"  Shell: {shell}")
+    if port:
+        set_env_vars(port, api_key, shell, dry_run)
+        results["steps"].append(f"env vars: port={port}")
+    else:
+        results["errors"].append("rest api: no config")
+
+    # Step 7: Verify
+    print(f"\n[7/7] Verify")
+    if dry_run:
+        print("  WOULD RUN: verify_vault.py + rebuild_manifest.py")
+    else:
+        run_rebuild_manifest(vault_path)
+        summary = run_verify(vault_path)
+        if summary:
+            errors = summary.get("errors", 0)
+            warnings = summary.get("warnings", 0)
+            if errors == 0 and warnings == 0:
+                print("  All checks passed")
+            else:
+                print(f"  {errors} errors, {warnings} warnings (run verify_vault.py for details)")
+            results["steps"].append(f"verify: {errors}e/{warnings}w")
+        else:
+            print("  Verification skipped (verify_vault.py not found)")
+
+    # Summary
+    print(f"\n{'=' * 50}")
+    if results["errors"]:
+        print("Setup completed with issues:")
+        for e in results["errors"]:
+            print(f"  - {e}")
+    else:
+        print("Setup complete!")
+
+    print(f"\nVault: {vault_path}")
+
+    if not api_key:
+        print("\nNext step: Open Obsidian, enable the Local REST API plugin,")
+        print("then re-run this script to pick up the generated API key.")
+
+    # Write marker inside the vault (not home dir — avoids polluting user env during tests)
+    marker = vault_path / ".secondbrain-installed"
+    if not dry_run:
+        marker.write_text(json.dumps(results, indent=2))
+    print(f"\nResults written to {marker}")
+
+    return 1 if results["errors"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

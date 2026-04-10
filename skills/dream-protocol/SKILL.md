@@ -51,6 +51,7 @@ Use DQL queries to find what needs attention. Don't exhaustively read everything
 
 Process everything found in Phase 2. Full details in `references/execution-pipeline.md`.
 
+- Process inbox items: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py "${VAULT_PATH:-$HOME/vault}"` for inbox processing instead of marking items as processed manually
 - Route inbox items to vault via ingest routing rules
 - Extract unprocessed signal from session log entries
 - Promote tasks approaching deadlines to "Urgent This Week"
@@ -66,9 +67,10 @@ Process everything found in Phase 2. Full details in `references/execution-pipel
 
 # Phase 4 — Verify & Index
 
-- Run verify-vault.py: `${CLAUDE_PLUGIN_ROOT}/skills/dream-protocol/scripts/verify-vault.py "${VAULT_PATH:-$HOME/vault}" --json`
-- Fix issues found, re-verify until clean (see execution-pipeline.md for issue handling)
-- Rebuild _MANIFEST.md as vault index (structure in `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`)
+- Run verify-vault.py: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "${VAULT_PATH:-$HOME/vault}" --json`
+- For auto-fixable issues, run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "${VAULT_PATH:-$HOME/vault}" --fix`
+- Fix remaining issues found, re-verify until clean (see execution-pipeline.md for issue handling)
+- Run manifest rebuild: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rebuild_manifest.py "${VAULT_PATH:-$HOME/vault}"`
   - **Regenerate the Content Catalog section** by walking all `.md` files outside `inbox/`, `archive/`, `scratch/`, extracting the first non-frontmatter heading and any leading `> ...` blockquote summary, grouping by parent folder (entities, projects, concepts, reference)
   - **Rebuild the Recent Activity section** from the last 7 days of `log.md` entries
 

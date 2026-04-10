@@ -31,7 +31,7 @@ Read brain/battle-plan-milestones.md. What was this week's target? Hit or missed
 
 ## 3. Commitments Audit (every section)
 
-Read brain/commitments.md and audit each section:
+Read brain/status.md and audit each section:
 
 | Section | Check |
 |---------|-------|
@@ -97,6 +97,12 @@ Present structured but concise:
 - What needs attention (be direct)
 - Plan for next week
 - If something is seriously behind schedule, say so plainly
+
+# Post-Write Validation
+After ALL writes are complete:
+1. Run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} --modified-only [files-you-touched] --json`
+2. If errors found, fix immediately
+3. Run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rebuild_manifest.py ${VAULT_PATH}` to update manifest
 
 # Forbidden Actions
 

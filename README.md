@@ -2,15 +2,15 @@
 
 > A persistent, scheduled second brain for Claude Code and Claude Cowork — backed by your own Obsidian vault.
 
-You install the plugin, run `/secondbrain:init`, answer 7 questions, and from that moment on Claude remembers you. Tasks, deadlines, decisions, the people in your life, what you said yesterday. It runs on autopilot — morning briefing at your wakeup time, deadline checks at 1pm, vault maintenance at 2am, weekly review on Sundays. You don't manage the system. The system runs your day and gets out of the way.
+You install the plugin, run `/secondbrain:init`, and from that moment on Claude remembers you. Tasks, deadlines, decisions, the people in your life, what you said yesterday. It runs on autopilot — morning briefing at your wakeup time, deadline checks at 1pm, vault maintenance at 2am, weekly review on Sundays. You don't manage the system. The system runs your day and gets out of the way.
 
-This is not "ChatGPT with extra steps." It's an opinionated **memory layer** with a strong point of view: the agent writes everything into a vault you own (plain Markdown, not a SaaS database), reads it at every session start, and never lets information die in conversation.
+This is not "ChatGPT with extra steps." It's an opinionated **memory layer** with a strong point of view: the agent writes everything into a vault you own (plain Markdown, not a SaaS database), reads it at every session start, and never lets information die in conversation. Vault integrity is enforced programmatically — Python scripts handle deterministic work (validation, manifest rebuilds, entity stubs), hooks block the agent if writes create integrity issues, and the agent focuses on judgment calls.
 
 ---
 
 ## Who this is for
 
-You want a persistent assistant that **remembers you**, runs your daily routines, and gets smarter the longer you use it. You're willing to spend 20 minutes on initial setup to never have to re-explain your context to Claude again.
+You want a persistent assistant that **remembers you**, runs your daily routines, and gets smarter the longer you use it. Setup is automated — the init script installs Obsidian, configures plugins, wires up the MCP connection, and scaffolds your vault. You answer 2-3 profile questions and you're done.
 
 You're fine with installing Obsidian (free) as the storage layer. You don't need to be an Obsidian power user — the plugin scaffolds everything for you and the agent maintains it. You'll mostly interact with the system through Claude Code or Cowork, not by editing files in Obsidian. But your data is human-readable Markdown sitting in plain files on your laptop. If Claude Code disappears tomorrow, your data is still yours.
 
@@ -25,22 +25,21 @@ Especially good if you have ADHD, are juggling many projects at once, or just ha
 /secondbrain:init
 ```
 
-Then follow the prompts. The init skill walks you through:
-- Installing Obsidian (if you don't have it)
-- Installing the Dataview and Local REST API plugins
-- Getting an API key
-- Setting environment variables (it offers to write them to your shell config for you)
-- Scaffolding your vault with starter files
-- Installing 6 scheduled tasks (you can opt out of any)
-- Seeding your profile with 7 conversational questions
-- Picking a sync method
-- Smoke-testing the install
+Then follow the prompts. The init skill automates nearly everything:
+- Installs Obsidian if missing (`brew`, `snap`, or `winget` depending on platform)
+- Downloads and installs the Dataview and Local REST API plugins from GitHub
+- Reads the API key and port from plugin config
+- Writes environment variables to your shell config (zsh/bash/fish/PowerShell)
+- Scaffolds your vault with starter files
+- Installs 6 scheduled tasks
+- Asks 2-3 profile questions (name, work, communication style)
+- Runs verification to confirm everything works
 
-About 15-20 minutes total. Most of it is one-time setup.
+About 5 minutes. Works on macOS, Linux, and Windows.
 
 ## Quick start — Claude Cowork
 
-1. Download [`secondbrain-v2.5.0.zip`](https://github.com/stjepanvrbic/secondbrain/releases/latest) from the GitHub Releases page
+1. Download [`secondbrain-v3.0.0.zip`](https://github.com/stjepanvrbic/secondbrain/releases/latest) from the GitHub Releases page
 2. Open Claude Desktop, switch to the **Cowork** tab
 3. Click **Customize** → **Browse plugins** → **Upload** → select the ZIP
 4. Click **Install** → **Authorize**
@@ -54,32 +53,29 @@ The init skill works the same in Cowork as in Code, except it auto-detects the e
 ## Prerequisites
 
 - **Claude Code** OR **Claude Cowork** (Claude Desktop with Cowork enabled)
-- **Obsidian** (free) — https://obsidian.md
-- **Dataview plugin** for Obsidian — installable from inside Obsidian, the init skill walks you through it
-- **Local REST API plugin** for Obsidian — same, installable from inside Obsidian
-- ~20 minutes for initial setup
-- An Obsidian vault somewhere on your filesystem (init creates one if you don't have one)
+- **Python 3.8+** (for the script suite — zero external dependencies)
+- **Obsidian** (free) — https://obsidian.md (init installs it automatically if missing)
+- ~5 minutes for initial setup
 
 ---
 
 ## What `/secondbrain:init` does for you
 
-The init skill is a 10-step dummy-proof flow. You don't need to know what an env var, MCP, or shell config is — init walks you through everything and offers to configure things for you (with explicit permission). Here's what happens:
+Init is mostly automated via `scripts/init_obsidian.py`. You don't need to know what an env var, MCP, or shell config is — the script handles it.
 
-1. **Greet and confirm** — friendly intro, you say "yes" to start
-2. **Detect environment** — figures out Code vs Cowork, branches accordingly
-3. **Prerequisites guided install** — for each missing piece (Obsidian, plugins, API key, env vars), specific click-by-click instructions assuming you've never used Obsidian before
-4. **MCP connection verification** — confirms it can actually talk to your vault
-5. **Vault detection / scaffolding** — creates starter folders and files, or fills in missing pieces if you have an existing vault
-6. **Automatic scheduled task installation** — 6 tasks installed via `CronCreate` in Code or via `/schedule` prompts in Cowork
-7. **Profile seeding** — 7 conversational questions (your name, what you do, your goals, communication preferences, daily rhythm) — answers fill in your `CLAUDE.md` and `me/profile.md`
-8. **Initial dream-protocol run** — builds the vault index, verifies everything
-9. **Sync method choice** — pick how to sync the vault across devices (Obsidian Sync, iCloud, Google Drive, Syncthing, or single-device only)
-10. **Smoke tests + setup complete report** — confirms everything works, prints next steps
+1. **Detect platform** — macOS, Linux, or Windows (including WSL)
+2. **Install Obsidian** — via `brew` (macOS), `snap` (Linux), or `winget` (Windows), skipped if already installed
+3. **Detect or create vault** — finds existing Obsidian vaults, or creates `~/secondbrain-vault`
+4. **Scaffold vault structure** — creates `brain/`, `entities/`, `me/`, `inbox/`, `archive/`, `scratch/` and all critical files
+5. **Install plugins** — downloads Dataview and Local REST API from GitHub releases into `.obsidian/plugins/`
+6. **Configure MCP connection** — reads API key and port from plugin config, writes env vars to your shell config
+7. **Verify** — runs `verify_vault.py` and `rebuild_manifest.py` to confirm everything is valid
+
+After the automated setup, the init skill asks 2-3 profile questions (name, work, communication style) and installs 6 scheduled tasks.
 
 **Idempotent:** running `/secondbrain:init` twice is safe. Re-runs detect what's already done and only complete missing pieces.
 
-**Verify mode:** `/secondbrain:init --verify` runs all 13 health checks with no side effects — useful for diagnosing issues without fear of overwriting anything.
+**Verify mode:** `/secondbrain:init --verify` delegates to `scripts/verify_vault.py` — runs all health checks with no side effects.
 
 ---
 
@@ -111,6 +107,25 @@ The hooks fire automatically, so as soon as you say something the `session-start
 | dream-protocol | 2:00am daily | `dream-protocol` | Vault maintenance, deadline promotion, manifest rebuild, link repair |
 
 Scheduled tasks only run when Claude Desktop / Code is open and your computer is awake. They don't run on a remote server.
+
+---
+
+## Scripts and programmatic enforcement
+
+v3.0 introduces a **script-first architecture**: deterministic tasks are handled by Python scripts, not agent prompts. This makes operations faster, more reliable, and enforceable via hooks.
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/verify_vault.py` | 10 integrity checkers (broken links, missing entities, duplicate headings, stale inbox, metadata, manifest drift, orphans, conflicts, structure, unconverted references). Supports `--modified-only`, `--fix`, `--json`. |
+| `scripts/create_entity_stubs.py` | Creates entity stub files from CLI args or verify output |
+| `scripts/archive_inbox.py` | Moves processed inbox items to `archive/inbox/YYYY-MM/`. `--dry-run` supported. |
+| `scripts/rebuild_manifest.py` | Regenerates `_MANIFEST.md` from actual vault state (atomic write) |
+| `scripts/vault_guide.py` | Dynamic vault summary — file counts, top entities, active tasks, deadlines, inbox status |
+| `scripts/init_obsidian.py` | Automated setup — installs Obsidian, plugins, configures MCP, scaffolds vault |
+
+**Hook enforcement:** A `PostToolUse` hook (`hooks/validate-after-write.sh`) runs `verify_vault.py` after every vault write operation. If the script finds integrity errors, it blocks the agent with exit code 2 and forces it to fix the issues before continuing. The agent cannot skip validation.
+
+**Testing:** 208 tests across 7 test files (pytest, zero external dependencies). All scripts tested on macOS, Windows, and Linux.
 
 ---
 
@@ -183,7 +198,7 @@ Run `/secondbrain:doctor` — it runs 14 read-only checks and tells you exactly 
 
 ### "I want to start over"
 
-Delete `~/.secondbrain-installed` (the marker file) and run `/secondbrain:init` again. The init skill will detect this as a fresh install and walk through the full flow. Your existing vault is left untouched unless you explicitly tell init to scaffold a new one.
+Delete `.secondbrain-installed` from your vault directory and run `/secondbrain:init` again. The init skill will detect this as a fresh install and walk through the full flow. Your existing vault is left untouched unless you explicitly tell init to scaffold a new one.
 
 ---
 

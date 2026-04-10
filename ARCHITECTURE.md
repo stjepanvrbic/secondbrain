@@ -68,7 +68,7 @@ The plugin defines three core operations on the wiki layer, each implemented as 
 
 **Skill:** `/secondbrain:ingest`
 
-When the user brain-dumps anything (text, paste, screenshot, voice), `ingest` parses the content and routes it to the appropriate Wiki pages. A single ingest typically touches multiple pages: the primary destination, any referenced entity pages, and the `log.md` audit trail. This is the "wiki maintenance" discipline — a brain dump about a meeting with a new person creates a task in `brain/commitments.md`, an entity page in `entities/`, a one-line entry in `log.md`, and possibly a decision entry in `brain/decisions.md`.
+When the user brain-dumps anything (text, paste, screenshot, voice), `ingest` parses the content and routes it to the appropriate Wiki pages. A single ingest typically touches multiple pages: the primary destination, any referenced entity pages, and the `log.md` audit trail. This is the "wiki maintenance" discipline — a brain dump about a meeting with a new person creates a task in `brain/status.md`, an entity page in `entities/`, a one-line entry in `log.md`, and possibly a decision entry in `brain/decisions.md`. After writing, a post-write validation hook runs `verify_vault.py` to ensure link integrity — the agent cannot proceed if validation fails.
 
 ### Query
 

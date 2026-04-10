@@ -18,6 +18,9 @@ metadata:
 1. Read `_MANIFEST.md` for current vault state.
 2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
 
+# First Action
+Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vault_guide.py ${VAULT_PATH}` as the first action to get dynamic vault context.
+
 # Output and Response Style
 
 ## Non-Morning Sessions
@@ -73,7 +76,7 @@ END
 # Error Handling
 
 - If brain/status.md missing: create minimal (timestamp, current focus = "unknown")
-- If brain/commitments.md missing: note absence, load brain/deadlines.md instead
+- If brain/status.md has no tasks: note absence, load brain/deadlines.md instead
 - If domain file missing but referenced in status.md: note absence, do not error
 - If entity files missing: load from glossary.md as fallback
 - Broken wikilinks: detect, log, continue (do not block context load)

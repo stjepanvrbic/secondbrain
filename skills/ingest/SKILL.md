@@ -20,6 +20,10 @@ All raw input becomes structured vault entries with full wikilinks and metadata.
 2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
 3. For content templates, read `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`.
 
+# Pre-Conditions (verify before executing)
+- MCP connection is live: `mcp__obsidian__vault_list` with path `/` returns
+- `brain/status.md` exists
+
 # Auto-Triggers
 
 **MUST invoke when ANY of:**
@@ -79,7 +83,7 @@ FOR each logical unit in input (task, idea, decision, person, deadline):
   7. VERIFY all wikilinks added
   8. Update referenced entity pages — for each [[entity]] linked from this
      content, append a one-line context note to the entity's file
-     (e.g., "Mentioned in commitments {{date}} re: <topic>")
+     (e.g., "Mentioned in status {{date}} re: <topic>")
 ENDFOR
 
 # Spread the update (per Karpathy wiki pattern)
@@ -92,10 +96,21 @@ ENDFOR
     no need to update it inline. New entities will appear in the catalog after
     the next dream run.
 
+11. After processing inbox items, run:
+    `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py ${VAULT_PATH}`
+    to move processed files to archive/inbox/.
+
 OUTPUT:
   "Got it — added [X tasks], [X ideas], [X decisions], created [X entities], updated [[entity1]] [[entity2]]."
   ONE LINE only.
 ```
+
+# Post-Write Validation
+After ALL writes are complete:
+1. Run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} --modified-only [files-you-touched] --json`
+2. If errors found (missing entities, broken links), fix immediately
+3. For missing entities: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py ${VAULT_PATH} entity-name`
+4. Do NOT mark the operation as complete until validation passes
 
 # Response Style
 
@@ -116,6 +131,10 @@ Got it — 1 task (unclear on deadline, guessed this week), 1 idea.
 
 # Error Handling
 
+- vault_patch fails -> read current file state, re-plan the edit, retry once
+- Entity doesn't exist -> create stub via scripts/create_entity_stubs.py
+- DQL query returns empty -> fall back to vault_search, then vault_list
+- Never mark operation complete if validation failed
 - **Ambiguous entity names**: Create or link to best-guess entity, note "verify entity link"
 - **Missing deadline**: Ingest without [due::], note in status.md
 - **Unknown domain**: Create note in scratch/ideas.md flagged for review
@@ -124,10 +143,10 @@ Got it — 1 task (unclear on deadline, guessed this week), 1 idea.
 
 # Forbidden Actions
 
-- Creating new task files (brain/commitments.md is ONLY task file)
+- Creating new task files (brain/status.md is ONLY task file)
 - Asking clarifying questions during dump
 - Narrating processing step-by-step
-- Deleting inbox files
+- Modifying inbox files in place (they are moved to archive/inbox/ after processing)
 - Leaving ANY text unlinked
 - Using TASKS.md (does not exist in this system)
 

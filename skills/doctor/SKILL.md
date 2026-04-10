@@ -12,7 +12,7 @@ metadata:
 
 # Core Rule
 
-Run a comprehensive read-only diagnostic of the secondbrain plugin install. For each check, report pass/fail with a SPECIFIC fix command if it fails. Never modify anything — `doctor` is purely diagnostic. If the user wants automatic repair, send them to `/secondbrain:init` (which IS allowed to write).
+Run a comprehensive read-only diagnostic of the secondbrain plugin install. For each check, report pass/fail with a SPECIFIC fix command if it fails. Never modify anything — `doctor` is purely diagnostic. The primary diagnostic tool is `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "${VAULT_PATH}" --json`. If the user wants automatic repair, send them to `/secondbrain:init` (which IS allowed to write).
 
 # Prerequisites
 

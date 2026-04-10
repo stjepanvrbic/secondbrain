@@ -8,7 +8,7 @@ All paths below are vault-relative — the plugin reads/writes via Obsidian MCP,
 
 | Content Type | Destination | Format |
 |---|---|---|
-| Task, action item, commitment | brain/commitments.md | Full inline metadata: [[entity]] #domain [due::] [energy::] [est::] |
+| Task, action item, commitment | brain/status.md | Full inline metadata: [[entity]] #domain [due::] [energy::] [est::] |
 | Idea, possibility, thought | scratch/ideas.md | Timestamped entry, #domain tags, [[entity]] links |
 | Decision + rationale | brain/decisions.md | Atomic section heading, context, [[entity]] links |
 | New person/company/place | entities/{name}.md | New entity file, typed frontmatter (type: person\|company\|organization\|place\|tool) |
@@ -64,16 +64,14 @@ When session-start detects unprocessed files in `inbox/`:
 
 ```
 FOR each file in inbox/:
-  IF file lacks [processed:: true] frontmatter:
-    1. Read file contents
-    2. Run through normal ingest routing
-    3. Add to vault (commitments/ideas/decisions/entities as appropriate)
-    4. ADD to file frontmatter:
-       processed: true
-       processed-date: [ISO timestamp]
-       source: [inbox | vault-discovery]
-    5. SAVE file (do not delete)
-  ENDIF
+  1. Read file contents
+  2. Run through normal ingest routing
+  3. Add to vault (status.md/ideas/decisions/entities as appropriate)
+  4. After ALL items are routed, run:
+     python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py ${VAULT_PATH}
+     This moves processed inbox files to archive/inbox/
+  5. NEVER modify the original inbox file in place
+  6. NEVER delete inbox files — they are archived, not removed
 ENDFOR
 ```
 

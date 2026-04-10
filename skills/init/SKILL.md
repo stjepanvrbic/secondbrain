@@ -306,13 +306,13 @@ For Cowork users, default to a path inside the workspace (e.g., `<workspace>/vau
 
 Validate the path doesn't already exist. If it does, ask if they want to use it as-is (reuse) or pick a different path.
 
-Once a path is chosen, create the directory and the full starter structure:
+Once a path is chosen, create the directory and the full starter structure. For automated setup, run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/init-obsidian.py "${VAULT_PATH}"` which handles scaffolding automatically. Otherwise, create manually:
 
 - `CLAUDE.md` from `@${CLAUDE_PLUGIN_ROOT}/references/CLAUDE.md.template` (placeholders to be filled in Step 6)
 - `_MANIFEST.md` from `@${CLAUDE_PLUGIN_ROOT}/references/_MANIFEST.md.template` (mostly empty rows — dream-protocol fills in)
 - `glossary.md` (empty starter)
 - `log.md` from the template (with one initial `init` entry)
-- `brain/status.md`, `brain/commitments.md`, `brain/deadlines.md`, `brain/goals.md`, `brain/decisions.md`, `brain/session-log.md` (each scaffolded from `references/templates.md`)
+- `brain/status.md`, `brain/deadlines.md`, `brain/goals.md`, `brain/decisions.md`, `brain/session-log.md` (each scaffolded from `references/templates.md`)
 - `entities/` (empty folder)
 - `inbox/` (empty folder)
 - `me/profile.md` from template (placeholders to be filled in Step 6)
@@ -491,6 +491,8 @@ Run each test and report pass/fail:
 3. **MCP connection** — final `mcp__obsidian__vault_list` to confirm still working.
 4. **Scheduled tasks visible** — call `CronList` (Code) or note the `/schedule` commands need to be run (Cowork).
 5. **`log.md` exists** with at least the initial `init` entry.
+6. **Vault verification** — run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "${VAULT_PATH}" --json` and confirm no errors.
+7. **Manifest rebuild** — run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rebuild_manifest.py "${VAULT_PATH}"` and confirm it completes.
 
 For each: green checkmark or red X with the specific failure.
 

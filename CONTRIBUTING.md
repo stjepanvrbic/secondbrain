@@ -11,15 +11,21 @@ git clone https://github.com/stjepanvrbic/secondbrain.git
 cd secondbrain
 ```
 
-The plugin is just a directory of Markdown files (skill definitions) and a single Python script (`skills/dream-protocol/scripts/verify-vault.py`). There's no build step.
+The plugin is Markdown skill files + Python scripts in `scripts/`. There's no build step.
 
-To test changes locally **without** affecting your real Claude Code install:
-1. Create a fresh test vault somewhere isolated (e.g., `~/test-vault/`)
-2. Set `VAULT_PATH=~/test-vault` in a terminal
-3. Point a fresh Claude Code session at your local clone of `secondbrain` instead of the installed version (the easiest way is to symlink your local clone into `~/.claude/plugins/cache/secondbrain/<version>/`)
-4. Run `/secondbrain:init --verify` against the test vault to make sure everything wires up
+### Running tests
 
-You can also use the `stjepan-demo` macOS user pattern from `demo-user-setup.md` (in the original lecture repo) to get a clean filesystem-isolated test environment.
+```bash
+python3 -m pytest tests/ -v
+```
+
+208 tests, zero external dependencies beyond pytest. Tests are fully self-contained — they create temporary vaults, never touch real filesystems or shell configs, and clean up automatically.
+
+### Testing changes locally
+
+1. Create a fresh test vault: `python3 scripts/init_obsidian.py --vault-path ~/test-vault --skip-install --dry-run`
+2. Point a fresh Claude Code session at your local clone (symlink into `~/.claude/plugins/cache/secondbrain/<version>/`)
+3. Run `/secondbrain:init --verify` against the test vault
 
 ---
 
@@ -40,9 +46,10 @@ Looking for first issues? These are good entry points:
 1. Fork the repo on GitHub
 2. Create a branch: `git checkout -b fix/short-description`
 3. Make your change
-4. **Test it** against a real vault (your own or a test one)
-5. Commit with a clear message — see "Commit messages" below
-6. Push and open a PR against `main`
+4. **Run the test suite:** `python3 -m pytest tests/ -v` — all 208 tests must pass
+5. If you changed scripts, also test against a real vault: `python3 scripts/verify_vault.py ~/your-vault`
+6. Commit with a clear message — see "Commit messages" below
+7. Push and open a PR against `main`
 
 ---
 

@@ -11,7 +11,7 @@ metadata:
 
 # Core Rule
 
-Review vault state, produce actionable updates. Read commitments, deadlines, goals, and project status. Auto-promote tasks by urgency, flag problems, and write updates to brain/status.md. Operate in focused mode (deadlines only) or full audit mode (weekly review).
+Review vault state, produce actionable updates. Read status, deadlines, goals, and project status. Auto-promote tasks by urgency, flag problems, and write updates to brain/status.md. Operate in focused mode (deadlines only) or full audit mode (weekly review). Use `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "${VAULT_PATH}" --json` for validation.
 
 # Prerequisites
 1. Read `_MANIFEST.md` for current vault state.
@@ -28,7 +28,7 @@ Used by deadline-tracker scheduled task. Quick check focused on time-sensitive i
 2. Categorize by urgency:
    - OVERDUE (past due) → flag in brain/status.md
    - CRITICAL (within 48 hours) → write warning to brain/status.md
-   - URGENT (within 7 days) → auto-promote to "Urgent This Week" in commitments.md
+   - URGENT (within 7 days) → auto-promote to "Urgent This Week" in status.md
 3. Write all changes to vault
 4. Brief summary of findings
 ```

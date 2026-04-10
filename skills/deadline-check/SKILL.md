@@ -22,7 +22,7 @@ Midday urgency check. Gather deadline data, categorize by proximity, auto-promot
 
 ## 1. Gather Deadline Data
 
-Query brain/commitments.md and brain/deadlines.md for all open tasks with [due::] fields. Also check brain/battle-plan-milestones.md for milestone deadlines.
+Query brain/status.md and brain/deadlines.md for all open tasks with [due::] fields. Also check brain/battle-plan-milestones.md for milestone deadlines.
 
 ## 2. Categorize by Urgency
 
@@ -36,7 +36,7 @@ Query brain/commitments.md and brain/deadlines.md for all open tasks with [due::
 ## 3. Auto-Promote
 
 For tasks due within 7 days in "This Week", "Ongoing", or "Someday":
-- Move to "URGENT (This Week)" in brain/commitments.md
+- Move to "URGENT (This Week)" in brain/status.md
 - Add note: `[auto-promoted: due within 7d — DATE]`
 
 For overdue tasks: add `[OVERDUE]` flag, move to top of URGENT.

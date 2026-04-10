@@ -27,18 +27,20 @@ Use DQL queries to find information whenever possible, and read files only if yo
 | Question Type | Data Needed | Where to Look |
 |---------------|-------------|---------------|
 | Person/entity ("who is X") | Entity file + backlinks | entities/{name}.md, then graph_links or DQL |
-| Timeline ("when is X due") | Tasks/deadlines with due dates | brain/commitments.md, brain/deadlines.md |
+| Timeline ("when is X due") | Tasks/deadlines with due dates | brain/status.md, brain/deadlines.md |
 | Status ("what's the status of X") | Recent activity | brain/status.md, {domain}/index.md |
-| Domain ("what's going on with X") | Overview + tasks | {domain}/index.md, commitments |
+| Domain ("what's going on with X") | Overview + tasks | {domain}/index.md, status.md |
 | Decision ("what did we decide about X") | Decision record | brain/decisions.md, domain files |
-| Task ("what tasks do I have for X") | Filtered task list | brain/commitments.md |
+| Task ("what tasks do I have for X") | Filtered task list | brain/status.md |
 | General ("search my notes for X") | Full-text match | vault_search, then read matches |
 
 ## Fallback Order
-1. DQL query / vault_search / graph_links (MCP-first)
-2. Quick checks: CLAUDE.md, glossary.md (hot cache)
-3. Domain-targeted file reads based on question topic
-4. Full-vault search across all .md files (last resort)
+1. DQL query / vault_search / graph_links
+2. Person/entity -> DQL on entities/ + graph_links for connections
+3. Timeline/deadline -> DQL with date filter on status.md, deadlines.md
+4. Status -> vault_read status.md directly
+5. Relationship -> graph_links from entity
+6. General/free-text -> vault_search, then read top results
 
 # Response Style
 
@@ -82,15 +84,15 @@ I don't have anything on that in your vault.
 
 # Search Implementation Details
 
-**Timeline queries:** Search brain/deadlines.md → brain/commitments.md [due::] → domain folder → CLAUDE.md milestones.
+**Timeline queries:** Search brain/deadlines.md -> brain/status.md [due::] -> domain folder -> CLAUDE.md milestones.
 
-**Status queries:** Search brain/status.md → domain/index.md → brain/commitments.md → extract urgency/blockers/progress.
+**Status queries:** Search brain/status.md -> domain/index.md -> extract urgency/blockers/progress.
 
 **Person/entity queries:** Search entities/ → glossary.md → load entity file with details.
 
-**Decision queries:** Search brain/decisions.md → domain files → commitments.md for resulting tasks.
+**Decision queries:** Search brain/decisions.md -> domain files -> status.md for resulting tasks.
 
-**Domain queries:** Load {domain}/index.md → commitments.md for domain tasks → status.md for blockers.
+**Domain queries:** Load {domain}/index.md -> status.md for domain tasks and blockers.
 
 **Keyword search (fallback):** Grep all .md files, return top 3-5 matches with context snippets as [[wikilinks]].
 

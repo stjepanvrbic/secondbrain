@@ -26,15 +26,15 @@ Read individual files only when you need full context that a query cannot provid
 |------|----------|
 | `_MANIFEST.md` | **Master index — READ THIS FIRST.** Vault health, domain list, content catalog, file tree, recent activity |
 | `log.md` | **Append-only chronological log** — every operation (ingest, dream-protocol, session-end, etc.) appends an entry. Greppable history. See "log.md format" below |
-| `brain/status.md` | Current focus, blockers, last session summary |
-| `brain/commitments.md` | ALL tasks — sections: URGENT (This Week), This Week, Ongoing, Waiting On, Someday, Done (Recent) |
+| `brain/status.md` | Current focus, active tasks (SINGLE SOURCE OF TRUTH), blockers, last session summary |
+| `brain/commitments.md` | DEPRECATED — archived. Replaced by brain/status.md |
 | `brain/deadlines.md` | Hard dates and countdowns |
 | `brain/goals.md` | Life goals and priorities |
 | `brain/decisions.md` | Decisions + rationale + context links |
 | `brain/session-log.md` | Reverse-chronological session history (richer than log.md — full session details) |
 | `entities/{kebab-name}.md` | Person/company/place/tool profiles (frontmatter: type, domains, relationship) |
 | `entities/directory.md` | Quick-reference entity lookup table |
-| `inbox/*.md` | Raw input staging — flagged `[processed:: true]` when done, NEVER deleted |
+| `inbox/*.md` | Raw input staging — moved to archive/inbox/ after processing, NEVER modified in place |
 | `{domain}/` | Domain folders the user creates as life areas grow |
 | `me/` | Self-knowledge: profile.md, energy.md, adhd-protocol.md (optional) |
 | `archive/` | Archived content (completed projects, old tasks) |
@@ -67,12 +67,11 @@ Read individual files only when you need full context that a query cannot provid
 
 | Field | Type | Valid Values | Found In |
 |-------|------|-------------|----------|
-| `[due:: DATE]` | Date | `2026-03-28` (ISO) | commitments.md, deadlines.md |
-| `[energy:: LEVEL]` | String | `low`, `medium`, `high` | commitments.md |
-| `[est:: TIME]` | String | `5min`, `10min`, `15min`, `30min`, `1hr`, `2hr` | commitments.md |
-| `[blocked-by:: LINK]` | Link | `[[entities/name]]` | commitments.md |
-| `[done:: DATE]` | Date | `2026-03-20` (ISO) | commitments.md |
-| `[processed:: BOOL]` | Boolean | `true`, `false` | inbox/ files |
+| `[due:: DATE]` | Date | `2026-03-28` (ISO) | status.md, deadlines.md |
+| `[energy:: LEVEL]` | String | `low`, `medium`, `high` | status.md |
+| `[est:: TIME]` | String | `5min`, `10min`, `15min`, `30min`, `1hr`, `2hr` | status.md |
+| `[blocked-by:: LINK]` | Link | `[[entities/name]]` | status.md |
+| `[done:: DATE]` | Date | `2026-03-20` (ISO) | status.md |
 | `type` | Frontmatter | `person`, `company`, `organization`, `place`, `tool` | entities/ |
 | `domains` | Frontmatter | `[domain1, domain2]` | entities/ |
 
@@ -92,7 +91,7 @@ TASK FROM "path" WHERE condition
 
 ### Common Mistakes
 - `TASK` queries do NOT support TABLE-style column lists — use `TASK FROM "path" WHERE condition`
-- `FROM` paths use forward slashes and double-escaped quotes in tool calls: `"brain/commitments"`
+- `FROM` paths use forward slashes and double-escaped quotes in tool calls: `"brain/status"`
 - `WHERE !completed` filters open tasks; `WHERE completed` filters done tasks
 - Date comparisons: `due <= date(today) + dur(7 days)` NOT `due <= today + 7`
 
@@ -125,6 +124,18 @@ TASK FROM "path" WHERE condition
 6. **Direct file system reads** → ONLY if Obsidian MCP is unreachable
 
 If a tool returns an error, try the next in priority. Do not retry the same failing tool.
+
+## Scripts
+
+Deterministic operations are handled by Python scripts in `scripts/`. Run these from the command line.
+
+| Script | Usage | Description |
+|--------|-------|-------------|
+| `verify_vault.py` | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} [--modified-only file1 file2] [--json]` | Validates vault integrity: checks for missing entities, broken wikilinks, orphaned files, and structural issues. Use `--modified-only` to scope checks to specific files after edits. |
+| `create_entity_stubs.py` | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py ${VAULT_PATH} entity-name` | Creates a stub entity file in `entities/` with standard frontmatter. Use when a wikilink references an entity that does not exist yet. |
+| `archive_inbox.py` | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py ${VAULT_PATH}` | Moves processed inbox files to `archive/inbox/`. Run after ingest processing is complete. |
+| `rebuild_manifest.py` | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rebuild_manifest.py ${VAULT_PATH}` | Regenerates `_MANIFEST.md` from current vault state. Normally run by dream-protocol, but can be invoked manually. |
+| `vault_guide.py` | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vault_guide.py ${VAULT_PATH}` | Outputs dynamic vault context summary: active domains, recent activity, current focus, key stats. Run at session-start for up-to-date orientation. |
 
 ## Wikilink Rules (NON-NEGOTIABLE)
 
