@@ -12,10 +12,7 @@
       "name": "secondbrain",
       "description": "Persistent memory and scheduled life-management for Claude Code and Claude Cowork, backed by your own Obsidian vault.",
       "version": "3.0.0",
-      "source": {
-        "source": "url",
-        "url": "https://github.com/stjepanvrbic/secondbrain.git"
-      },
+      "source": "./",
       "author": {
         "name": "Stjepan Vrbic"
       }
