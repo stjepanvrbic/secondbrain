@@ -357,44 +357,49 @@ After vault setup, the VAULT_PATH must be available to all scripts and hooks. Th
 
 # Step 5 — Scheduled task installation
 
-## 5-pre. Ask about scheduled task ownership
-
-If the user is connecting to an existing vault (Scenario 2), ask:
+**MANDATORY QUESTION — ALWAYS ASK THIS BEFORE SHOWING ANY TASK LIST:**
 
 ```
-Are scheduled tasks (morning briefing, dream protocol, etc.) already
-managed by another instance — for example, a Cowork session?
+Scheduled tasks are things like morning briefings, deadline checks,
+and nightly vault maintenance. They run automatically on a schedule.
 
-  1. Yes — another instance handles scheduling (skip task installation)
-  2. No — set up scheduled tasks on this instance
+How should we handle scheduled tasks for this instance?
 
-Which one? (1 or 2)
+  1. Skip — another instance (e.g., Cowork) already runs them
+  2. Set up CronCreate jobs on this Claude Code instance
+  3. Not sure — explain more
+
+Which one? (1, 2, or 3)
 ```
 
-If the user picks **1 (another instance manages scheduling)**:
-- Skip all scheduled task installation
-- Print: `Skipping scheduled tasks — managed elsewhere. You can still run any skill manually (e.g., /secondbrain:morning-brief).`
+**You MUST wait for the user's answer before proceeding. Do NOT skip this question. Do NOT show the task list before asking this.**
+
+If **1 (skip)**:
+- Install zero scheduled tasks
+- Print: `Skipping scheduled tasks — managed elsewhere. You can still invoke any skill manually anytime (e.g., /secondbrain:morning-brief, /secondbrain:dream-protocol).`
 - Proceed to Step 6
 
-If the user picks **2 (set up here)**, or if this is a fresh install (Scenario 1), continue with task installation below.
+If **3 (explain)**:
+- Explain: "Scheduled tasks use Claude Code's CronCreate to run skills at specific times (e.g., morning briefing at 10:30am). If you already have a Cowork session that handles these, you don't need to duplicate them here. You can always run any skill manually regardless."
+- Re-ask the question (1 or 2)
+
+If **2 (set up here)**, continue with task selection:
 
 ## 5a. Task selection
 
 Read `@${CLAUDE_PLUGIN_ROOT}/scheduled-tasks/MANIFEST.md` for the bundled tasks.
 
-Print the 6 tasks with their default crons + a one-line description, then ask the user to confirm. Default each to "on"; the user can hit enter to accept all or type the task name to toggle:
-
 ```
-I'll set up these scheduled tasks (you can opt out of any of them):
+I'll set up these scheduled tasks (you can opt out of any):
 
   ☑ morning-briefing      10:30am daily       Morning context + day plan
-  ☑ deadline-tracker       1:00pm daily       Auto-promote urgent items
-  ☑ email-triage           9:00am weekdays    Read inbox, extract action items (requires Gmail MCP)
-  ☑ end-of-day-capture     7:30pm daily       Review day, brain dump, flush state
-  ☑ weekly-review          8:00pm Sundays     Full weekly audit
-  ☑ dream-protocol         2:00am daily       Vault maintenance + index rebuild
+  ☑ deadline-tracker       1:00pm daily        Auto-promote urgent items
+  ☑ email-triage           9:00am weekdays     Read inbox, extract action items (requires Gmail MCP)
+  ☑ end-of-day-capture     7:30pm daily        Review day, brain dump, flush state
+  ☑ weekly-review          8:00pm Sundays      Full weekly audit
+  ☑ dream-protocol         2:00am daily        Vault maintenance + index rebuild
 
-Type "all" to accept all (or type a task name to toggle it off, then "all" when ready):
+Type "all" to accept, or a task name to toggle it off:
 ```
 
 For each opted-in task, branch on `ENV`:
