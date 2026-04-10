@@ -526,93 +526,98 @@ After answers:
 
 ---
 
-# Step 7 — Initial dream-protocol run
+# Step 7 — Finalize: ensure vault is fully healthy
+
+**This step is NOT optional. It runs for ALL scenarios (fresh, connect, import). When init completes, the vault MUST be in a fully healthy state with zero errors.**
+
+## 7a. Run all fix scripts
 
 ```
-Now I'll run the dream-protocol skill to establish a baseline. This:
-- Builds the vault index (_MANIFEST.md content catalog)
-- Verifies wikilinks
-- Appends the first entry to log.md
-- Commits the initial state to git (if you have git installed)
-
-This usually takes 1-2 minutes...
+Finalizing — making sure everything is healthy...
 ```
 
-Invoke `/secondbrain:dream-protocol`. Capture its output. Print a summary.
+Run these in order:
+1. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rebuild_manifest.py "${VAULT_PATH}"` — ensure manifest matches reality
+2. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py "${VAULT_PATH}"` — move any processed inbox items to archive
+3. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "${VAULT_PATH}" --fix --json` — auto-fix duplicate headings, then check everything
+
+## 7b. Fix remaining issues from verification
+
+Read the verify output. For any remaining errors:
+- Missing entity files → `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py "${VAULT_PATH}" --from-json <output>`
+- Broken wikilinks → attempt to fix by finding the correct target, or flag for user
+- Invalid metadata → fix the field values directly
+- Structural issues (missing dirs/files) → create them
+
+**Keep running verify_vault.py until it reports 0 errors.** Warnings are acceptable (orphans, suggestions), errors are not.
+
+## 7c. Run dream-protocol
+
+Invoke `/secondbrain:dream-protocol` to consolidate the vault:
+- Rebuilds the full vault index
+- Processes any remaining inbox items
+- Repairs wikilinks
+- Appends a log entry
+
+## 7d. Final verification
+
+Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "${VAULT_PATH}" --json` one last time.
+Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vault_guide.py "${VAULT_PATH}"` to get the vault summary.
+
+Print the results:
+```
+Vault health: N errors, N warnings
+Files: N total | Entities: N | Active tasks: N
+Inbox: N unprocessed | Last dream-protocol: just now
+```
+
+If there are still errors, print each one with a suggested fix. These are issues that need human judgment.
 
 ---
 
-# Step 8 — Sync method choice
+# Step 8 — Sync method (first-time only)
+
+**Skip this step if the user already has sync configured (check if vault is inside iCloud Drive, Google Drive, or has .stfolder for Syncthing).**
 
 ```
-How would you like to sync your vault across devices? (You can change
-this later — pick whatever feels easiest right now.)
+Do you want to sync your vault across devices?
 
-  1. Obsidian Sync ($4/month, easiest, runs over Obsidian's own service)
-  2. iCloud Drive (Mac-only, free, can have sync conflicts)
-  3. Google Drive (free, requires Google Drive desktop app)
-  4. Syncthing (free, peer-to-peer, more setup)
-  5. Skip for now (single-device only — you can pick later)
+  1. Obsidian Sync ($4/month, easiest)
+  2. iCloud Drive (Mac-only, free)
+  3. Google Drive (free, needs desktop app)
+  4. Syncthing (free, peer-to-peer)
+  5. Skip for now (single-device)
 
 Which one? (1-5)
 ```
 
-For each choice, write a `SYNC.md` file in the vault root with the user's chosen method and the relevant setup steps. For methods where the plugin can help (e.g., moving the vault to iCloud Drive folder), offer to do it. For methods that require manual action, print step-by-step instructions and let the user execute them at their own pace.
-
-For "Skip for now": just write a one-line note to `SYNC.md` saying `Single-device mode. Run /secondbrain:init again to choose a sync method later.`
+For "Skip": note in the final report that sync is not configured.
 
 ---
 
-# Step 9 — Verification smoke tests
-
-```
-Let me run a few smoke tests to make sure everything works...
-```
-
-Run each test and report pass/fail:
-
-1. **`/secondbrain:whats-next`** — invoke the skill. Should return ONE task. Even with a fresh vault, it should produce a placeholder ("Get started: write a brain dump about something on your mind") instead of crashing.
-2. **`/secondbrain:knowledge-search "who am I"`** — should return content from `me/profile.md` (just-seeded in Step 6).
-3. **MCP connection** — final `mcp__obsidian__vault_list` to confirm still working.
-4. **Scheduled tasks visible** — call `CronList` (Code) or note the `/schedule` commands need to be run (Cowork).
-5. **`log.md` exists** with at least the initial `init` entry.
-6. **Vault verification** — run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "${VAULT_PATH}" --json` and confirm no errors.
-7. **Manifest rebuild** — run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rebuild_manifest.py "${VAULT_PATH}"` and confirm it completes.
-
-For each: green checkmark or red X with the specific failure.
-
----
-
-# Step 10 — Setup Complete report
+# Step 9 — Setup Complete
 
 Print the final summary:
 
 ```
-✓ Setup Complete!
+Setup Complete!
 
 Environment: Claude Code
-Vault: ~/vault/
-Profile: me/profile.md (USER_NAME, USER_ROLE, ...)
-Scheduled tasks: 6 installed (morning-briefing 10:30am, ...)
-Sync: Google Drive (or whichever was chosen)
-Smoke tests: 5/5 passing
+Vault: ~/vault/ (N files, N entities, N active tasks)
+Profile: seeded / already populated
+Scheduled tasks: N installed / skipped (managed elsewhere)
+Vault health: 0 errors
+Sync: configured / not configured
 
-You're ready! Try one of these:
+You're ready. Try:
 
-  "what's next?"           → get your first task
-  "brain dump: ..."        → ingest something into the vault
-  "who am I"               → test knowledge search
-  "/secondbrain:init --verify"  → re-run verification anytime
-
-A few things you may still want to do manually:
-  - Expand me/profile.md as you think of more context to share
-  - Install Obsidian on your phone for vault access on the go
-  - (Cowork only) Run the /schedule commands I printed above
-
-Run /secondbrain:init again anytime to re-verify or fix issues.
+  "what's next?"              → get a task
+  "brain dump: ..."           → ingest into vault
+  "/secondbrain:doctor"       → health check anytime
+  "/secondbrain:init --verify"  → re-verify
 ```
 
-Touch `~/.secondbrain-installed` to mark the install state.
+Write the install marker to `${VAULT_PATH}/.secondbrain-installed` with results JSON.
 
 ---
 
