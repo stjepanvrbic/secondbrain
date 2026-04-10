@@ -7,7 +7,7 @@ description: >
   reports pass/fail with specific fix commands for each issue. Read-only —
   never modifies anything.
 metadata:
-  version: "3.1.0"
+  version: "3.1.1"
 ---
 
 # Core Rule
