@@ -6,7 +6,7 @@ description: >
   Loads vault context, processes overnight inbox, builds an energy-matched
   3-5 task day plan, and presents it directly. Scheduled task only.
 metadata:
-  version: "2.4.0"
+  version: "3.0.0"
 ---
 
 # Core Rule

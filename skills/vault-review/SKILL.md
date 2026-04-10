@@ -6,7 +6,7 @@ description: >
   deadline check or weekly review task runs. Supports focused deadline reviews
   and full weekly audits with auto-promotion of urgent tasks.
 metadata:
-  version: "2.4.0"
+  version: "3.0.0"
 ---
 
 # Core Rule
