@@ -12,7 +12,7 @@ description: >
   Supports a `--verify` mode that runs verification only (no creates,
   no installs) for diagnosing existing installs.
 metadata:
-  version: "3.1.2"
+  version: "3.1.3"
 ---
 
 # Core Rule
@@ -28,7 +28,8 @@ The skill is **environment-aware** — it detects whether it's running in Claude
 1. Read `_MANIFEST.md` for current vault state (may not exist on first run).
 2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
 3. For content templates, read `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`.
-4. For bundled scheduled tasks, read `@${CLAUDE_PLUGIN_ROOT}/scheduled-tasks/MANIFEST.md`.
+4. For environment-specific paths and setup, read `@${CLAUDE_PLUGIN_ROOT}/references/environments.md`.
+5. For bundled scheduled tasks, read `@${CLAUDE_PLUGIN_ROOT}/scheduled-tasks/MANIFEST.md`.
 
 # Modes
 

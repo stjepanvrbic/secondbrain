@@ -7,7 +7,7 @@ description: >
   vault files, and appends session log. MANDATORY last action of
   every session.
 metadata:
-  version: "3.1.2"
+  version: "3.1.3"
 ---
 
 # Core Rule

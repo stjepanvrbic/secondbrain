@@ -150,3 +150,7 @@ Deterministic operations are handled by Python scripts in `scripts/`. Run these 
 - Every task MUST link to at least one entity
 - Every bullet point SHOULD contain at least one [[wikilink]]
 - NO unlinked information enters the vault
+
+## See Also
+
+- `@${CLAUDE_PLUGIN_ROOT}/references/environments.md` — Claude Code vs Cowork paths, scheduled tasks, MCP config, platform differences

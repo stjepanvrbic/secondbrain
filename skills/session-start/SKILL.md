@@ -7,7 +7,7 @@ description: >
   deadlines, and focus domain. Morning mode builds a day plan energy-matched
   to the user's rhythm.
 metadata:
-  version: "3.1.2"
+  version: "3.1.3"
 ---
 
 # Core Rule
@@ -17,6 +17,7 @@ metadata:
 # MUST READ EVERY SESSION, NON-NEGOTIABLE
 1. Read `_MANIFEST.md` for current vault state.
 2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
+3. For environment-specific paths, read `@${CLAUDE_PLUGIN_ROOT}/references/environments.md`.
 
 # First Actions (in order)
 1. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/auto_update.py` — pull latest plugin version if available (fast, silent if up to date)

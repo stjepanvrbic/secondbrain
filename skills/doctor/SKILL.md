@@ -7,7 +7,7 @@ description: >
   reports pass/fail with specific fix commands for each issue. Read-only —
   never modifies anything.
 metadata:
-  version: "3.1.2"
+  version: "3.1.3"
 ---
 
 # Core Rule
@@ -17,6 +17,7 @@ Run a comprehensive read-only diagnostic of the secondbrain plugin install. For 
 # Prerequisites
 
 1. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
+3. For environment-specific paths, read `@${CLAUDE_PLUGIN_ROOT}/references/environments.md`.
 
 # Execution
 
