@@ -1,13 +1,20 @@
 {
-  "version": "0.1.0",
+  "name": "secondbrain",
+  "owner": {
+    "name": "Stjepan Vrbic"
+  },
+  "metadata": {
+    "description": "Persistent memory and life-management for Claude Code and Cowork, backed by Obsidian.",
+    "version": "1.0.0"
+  },
   "plugins": [
     {
       "name": "secondbrain",
       "description": "Persistent memory and scheduled life-management for Claude Code and Claude Cowork, backed by your own Obsidian vault.",
       "version": "3.0.0",
-      "repository": "https://github.com/stjepanvrbic/secondbrain",
+      "source": ".",
       "author": {
-        "name": "stjepanvrbic"
+        "name": "Stjepan Vrbic"
       }
     }
   ]
