@@ -1,6 +1,6 @@
 {
   "name": "secondbrain",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Persistent memory and scheduled life-management for Claude Code and Claude Cowork, backed by your own Obsidian vault. Daily briefings, deadline tracking, knowledge graph, multi-device sync. Dummy-proof setup via /secondbrain:init.",
   "author": {
     "name": "stjepanvrbic"
@@ -8,5 +8,14 @@
   "homepage": "https://github.com/stjepanvrbic/secondbrain",
   "repository": "https://github.com/stjepanvrbic/secondbrain",
   "license": "MIT",
-  "keywords": ["memory", "productivity", "obsidian", "session-management", "knowledge-work", "second-brain", "scheduling", "cowork"]
+  "keywords": [
+    "memory",
+    "productivity",
+    "obsidian",
+    "session-management",
+    "knowledge-work",
+    "second-brain",
+    "scheduling",
+    "cowork"
+  ]
 }
