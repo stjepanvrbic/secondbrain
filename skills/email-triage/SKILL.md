@@ -7,7 +7,7 @@ description: >
   inbox reaches zero unread. Categorizes, extracts action items, labels important
   emails, archives noise. Inbox must be clean when done.
 metadata:
-  version: "3.1.1"
+  version: "3.1.2"
 ---
 
 # Core Rule

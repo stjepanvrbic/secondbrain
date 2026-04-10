@@ -7,7 +7,7 @@ description: >
   deadlines, and focus domain. Morning mode builds a day plan energy-matched
   to the user's rhythm.
 metadata:
-  version: "3.1.1"
+  version: "3.1.2"
 ---
 
 # Core Rule
