@@ -485,6 +485,64 @@ def scaffold_vault(vault_path: Path, dry_run: bool = False) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Note import (Scenario 3: bring in existing notes)
+# ---------------------------------------------------------------------------
+
+IMPORTABLE_SUFFIXES = {".md", ".txt", ".docx", ".pdf", ".html", ".rtf", ".csv", ".json"}
+
+
+def import_notes(vault_path: Path, source: Path, dry_run: bool = False) -> int:
+    """Copy files from source into vault's inbox/. Never modifies originals.
+
+    Preserves directory structure as filename prefixes:
+    source/work/meeting.md -> inbox/work--meeting.md
+    """
+    inbox = vault_path / "inbox"
+    if not dry_run:
+        inbox.mkdir(parents=True, exist_ok=True)
+
+    copied = 0
+    skipped = 0
+
+    for dirpath, _dirnames, filenames in os.walk(source):
+        for fname in filenames:
+            src = Path(dirpath) / fname
+            if src.suffix.lower() not in IMPORTABLE_SUFFIXES:
+                skipped += 1
+                continue
+
+            # Build a flat name preserving directory context
+            rel = src.relative_to(source)
+            parts = list(rel.parts)
+            if len(parts) > 1:
+                flat_name = "--".join(parts[:-1]) + "--" + parts[-1]
+            else:
+                flat_name = parts[0]
+
+            dest = inbox / flat_name
+            # Avoid overwriting
+            if dest.exists():
+                stem, suffix = dest.stem, dest.suffix
+                n = 1
+                while dest.exists():
+                    dest = inbox / f"{stem}-{n}{suffix}"
+                    n += 1
+
+            if dry_run:
+                print(f"  WOULD COPY: {rel} -> inbox/{dest.name}")
+            else:
+                import shutil
+                shutil.copy2(str(src), str(dest))
+            copied += 1
+
+    print(f"  {'Would copy' if dry_run else 'Copied'} {copied} files to inbox/ ({skipped} skipped, unsupported type)")
+    if not dry_run:
+        print(f"  Originals at {source} are untouched.")
+        print(f"  Run 'process inbox' or /secondbrain:ingest to process the imported notes.")
+    return copied
+
+
+# ---------------------------------------------------------------------------
 # Verification
 # ---------------------------------------------------------------------------
 
@@ -528,6 +586,7 @@ def run_rebuild_manifest(vault_path: Path, dry_run: bool = False) -> bool:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Automated Obsidian setup for secondbrain")
     p.add_argument("--vault-path", type=Path, help="Path to vault (default: auto-detect or ~/secondbrain-vault)")
+    p.add_argument("--import-from", type=Path, help="Copy existing notes from this path into the vault's inbox")
     p.add_argument("--skip-install", action="store_true", help="Skip Obsidian installation")
     p.add_argument("--dry-run", action="store_true", help="Show what would happen without making changes")
     return p
@@ -603,8 +662,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("  All directories and files already exist")
         results["steps"].append("scaffold: already complete")
 
+    # Step 4b: Import notes (if --import-from specified)
+    if args.import_from:
+        source = args.import_from.expanduser().resolve()
+        print(f"\n[4b] Import notes from {source}")
+        if not source.is_dir():
+            print(f"  Error: source path not found: {source}")
+            results["errors"].append(f"import: source not found")
+        else:
+            count = import_notes(vault_path, source, dry_run)
+            results["steps"].append(f"import: {count} files copied to inbox/")
+
     # Step 5: Install plugins
-    print(f"\n[5/7] Plugins")
+    print(f"\n[5/8] Plugins")
     plugin_ids = []
     for name, info in PLUGINS.items():
         ok = install_plugin(vault_path, name, info, dry_run)

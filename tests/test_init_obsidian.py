@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from init_obsidian import (
     detect_platform, is_wsl, find_obsidian, find_existing_vaults,
     install_plugin, enable_plugins, configure_rest_api, detect_shell,
-    set_env_vars, scaffold_vault, default_vault_path, main,
+    set_env_vars, scaffold_vault, import_notes, default_vault_path, main,
     REQUIRED_DIRS, CRITICAL_FILES, PLUGINS,
 )
 
@@ -289,6 +289,83 @@ class TestScaffoldVault:
         scaffold_vault(tmp_path)
         content = (tmp_path / "brain" / "status.md").read_text()
         assert "commitment" not in content.lower()
+
+
+# ---------------------------------------------------------------------------
+# Note import
+# ---------------------------------------------------------------------------
+
+class TestImportNotes:
+    def test_copies_md_files(self, tmp_path: Path):
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        source = tmp_path / "notes"
+        source.mkdir()
+        (source / "note1.md").write_text("# Note 1")
+        (source / "note2.md").write_text("# Note 2")
+
+        count = import_notes(vault, source)
+        assert count == 2
+        assert (vault / "inbox" / "note1.md").exists()
+        assert (vault / "inbox" / "note2.md").exists()
+
+    def test_preserves_originals(self, tmp_path: Path):
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        source = tmp_path / "notes"
+        source.mkdir()
+        (source / "important.md").write_text("# Important")
+
+        import_notes(vault, source)
+        assert (source / "important.md").exists()
+        assert (source / "important.md").read_text() == "# Important"
+
+    def test_flattens_subdirectories(self, tmp_path: Path):
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        source = tmp_path / "notes"
+        (source / "work").mkdir(parents=True)
+        (source / "work" / "meeting.md").write_text("# Meeting")
+
+        import_notes(vault, source)
+        assert (vault / "inbox" / "work--meeting.md").exists()
+
+    def test_skips_unsupported_types(self, tmp_path: Path):
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        source = tmp_path / "notes"
+        source.mkdir()
+        (source / "note.md").write_text("# Note")
+        (source / "image.png").write_bytes(b"\x89PNG")
+        (source / "data.csv").write_text("a,b,c")
+
+        count = import_notes(vault, source)
+        assert count == 2  # .md + .csv (csv is importable)
+        assert (vault / "inbox" / "note.md").exists()
+
+    def test_dry_run_no_changes(self, tmp_path: Path):
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        source = tmp_path / "notes"
+        source.mkdir()
+        (source / "note.md").write_text("# Note")
+
+        count = import_notes(vault, source, dry_run=True)
+        assert count == 1
+        assert not (vault / "inbox").exists()
+
+    def test_handles_name_collision(self, tmp_path: Path):
+        vault = tmp_path / "vault"
+        (vault / "inbox").mkdir(parents=True)
+        (vault / "inbox" / "note.md").write_text("# Existing")
+        source = tmp_path / "notes"
+        source.mkdir()
+        (source / "note.md").write_text("# New")
+
+        import_notes(vault, source)
+        assert (vault / "inbox" / "note-1.md").exists()
+        assert (vault / "inbox" / "note-1.md").read_text() == "# New"
+        assert (vault / "inbox" / "note.md").read_text() == "# Existing"
 
 
 # ---------------------------------------------------------------------------

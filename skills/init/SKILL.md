@@ -43,17 +43,7 @@ Print a friendly intro:
 
 ```
 Welcome to secondbrain! I'm going to walk you through setup.
-
-Here's what's about to happen:
-  1. I'll check what you already have installed (Obsidian, plugins, API key)
-  2. For anything missing, I'll walk you through installing it
-  3. I'll set up your vault (folders + starter files)
-  4. I'll install scheduled tasks so the system runs on autopilot
-  5. I'll ask you a few quick questions to seed your profile
-  6. I'll run verification to make sure everything works
-
-Total time: about 15-20 minutes. Most of it is one-time setup you'll
-never have to do again.
+This takes about 5 minutes — most of it is automated.
 
 Ready to start? (yes / no)
 ```
@@ -61,6 +51,28 @@ Ready to start? (yes / no)
 If the user says no, exit cleanly with: `OK — run /secondbrain:init when you're ready.`
 
 If the user says yes, proceed.
+
+## 0a. Detect scenario
+
+Ask the user ONE question to determine the setup path:
+
+```
+Which of these describes your situation?
+
+  1. Fresh start — I don't have any notes, create everything from scratch
+  2. Connect existing vault — I already have a secondbrain vault (on this 
+     device or synced from another) and I want to connect to it
+  3. Import notes — I have existing notes from another app (Notion, Apple
+     Notes, markdown files, etc.) that I want to bring in
+
+Which one? (1, 2, or 3)
+```
+
+Store as `SCENARIO`. This determines the vault setup path in Step 4:
+
+- **Scenario 1 (fresh):** Create a new vault with full scaffolding
+- **Scenario 2 (connect):** User points to an existing vault path. Verify it has secondbrain structure, wire MCP, skip scaffolding. Only fill in missing pieces.
+- **Scenario 3 (import):** Create a new secondbrain vault, then COPY (never move, never modify) the user's existing notes into `inbox/` for processing by ingest. Ask for the source path. The plugin NEVER touches the originals.
 
 ---
 
@@ -274,55 +286,66 @@ Loop: re-prompt the user to fix and try again. Don't proceed until the connectio
 
 ---
 
-# Step 4 — Vault detection and scaffolding
+# Step 4 — Vault setup (branches by SCENARIO from Step 0a)
 
-Branch on whether a vault exists.
-
-## 4a. Existing vault path
-
-The MCP connection succeeded — there's a vault, but it might not be a secondbrain vault yet.
-
-1. Try to read `_MANIFEST.md` via the MCP. If it exists and looks like a secondbrain manifest, this is an existing secondbrain vault — note that and skip to Step 5.
-2. If `_MANIFEST.md` is missing or doesn't look like ours: this is an existing Obsidian vault that needs scaffolding added.
-3. List the standard folders (`brain/`, `entities/`, `me/`, `inbox/`, `archive/`) and check each:
-   - Folder exists? Skip.
-   - Folder missing? Ask permission: `I'd like to create the "brain/" folder in your vault. OK?`
-4. Same for standard files (`CLAUDE.md`, `_MANIFEST.md`, `glossary.md`, `log.md`):
-   - File exists? Skip.
-   - File missing? Ask permission: `I'd like to create CLAUDE.md from the template. OK?`
-5. **Never overwrite anything** — only fill in missing pieces. If there's a conflict (e.g., the user has a `brain/status.md` with different format), ask before doing anything.
-
-## 4b. Fresh vault (no vault yet)
+## 4a. Scenario 1 — Fresh start
 
 ```
 Where would you like your vault to live?
 
-[Recommended: ~/vault]
+[Recommended: ~/secondbrain-vault]
 
 Type a path or hit enter to accept the default:
 ```
 
-For Cowork users, default to a path inside the workspace (e.g., `<workspace>/vault/` if you can detect the workspace, otherwise prompt the user).
+Once a path is chosen, run the automated setup:
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/init_obsidian.py --vault-path "<path>" --skip-install
+```
 
-Validate the path doesn't already exist. If it does, ask if they want to use it as-is (reuse) or pick a different path.
+This creates the full vault structure (brain/, entities/, me/, inbox/, archive/, scratch/) and all critical files. The script never overwrites existing files.
 
-Once a path is chosen, create the directory and the full starter structure. For automated setup, run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/init-obsidian.py "${VAULT_PATH}"` which handles scaffolding automatically. Otherwise, create manually:
+## 4b. Scenario 2 — Connect existing vault
 
-- `CLAUDE.md` from `@${CLAUDE_PLUGIN_ROOT}/references/CLAUDE.md.template` (placeholders to be filled in Step 6)
-- `_MANIFEST.md` from `@${CLAUDE_PLUGIN_ROOT}/references/_MANIFEST.md.template` (mostly empty rows — dream-protocol fills in)
-- `glossary.md` (empty starter)
-- `log.md` from the template (with one initial `init` entry)
-- `brain/status.md`, `brain/deadlines.md`, `brain/goals.md`, `brain/decisions.md`, `brain/session-log.md` (each scaffolded from `references/templates.md`)
-- `entities/` (empty folder)
-- `inbox/` (empty folder)
-- `me/profile.md` from template (placeholders to be filled in Step 6)
-- `me/energy.md` from template
-- `archive/` (empty folder)
-- `scratch/` (empty folder)
+```
+Where is your existing secondbrain vault?
 
-Initialize git in the vault (optional but recommended):
-- Run `git init && git add . && git commit -m "Initial second brain scaffolding via /secondbrain:init"` from the vault directory
-- If git isn't installed or the user declines, skip without error
+Type the path (e.g., ~/vault, ~/cowork, /Users/you/Obsidian/secondbrain):
+```
+
+After the user provides a path:
+1. Verify the path exists and is a directory
+2. Check for secondbrain markers: `_MANIFEST.md`, `brain/status.md`, `entities/`
+3. If markers found: this is a secondbrain vault — print `Found secondbrain vault at <path>.`
+4. If markers missing: this is an Obsidian vault but not a secondbrain vault. Run `scripts/init_obsidian.py --vault-path "<path>" --skip-install` to fill in missing scaffolding (the script never overwrites existing files)
+5. Wire the MCP connection to point to this vault
+6. Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "<path>"` to check health
+7. Skip profile seeding (Step 6) if `me/profile.md` already has real content
+
+This is the path for users who already have a vault on another device (synced via Obsidian Sync, iCloud, etc.) or who are installing the plugin in Claude Code after using it in Cowork.
+
+## 4c. Scenario 3 — Import existing notes
+
+```
+Where are your existing notes? I'll COPY them into the vault's inbox
+for processing. Your originals will NOT be touched.
+
+Type the path to your notes folder:
+```
+
+After the user provides a source path:
+1. Create a fresh vault first (same as Scenario 1 — ask for vault path, run init_obsidian.py)
+2. COPY (never move, never modify) all `.md` files from the source path into `inbox/`
+3. For non-markdown files (.docx, .pdf, .txt, etc.): copy them to `inbox/` too — the ingest skill will handle or flag them
+4. Preserve the original directory structure as filename prefixes: `notes/work/meeting.md` becomes `inbox/work--meeting.md`
+5. Print a summary: `Copied N files into inbox/. Your originals at <source> are untouched.`
+6. After the full init completes, suggest: `Run "process inbox" to have me ingest all your imported notes.`
+
+**CRITICAL:** The plugin NEVER modifies, moves, or deletes files outside the vault. The source folder is read-only. Only copies are made.
+
+## Vault path storage
+
+After vault setup, the VAULT_PATH must be available to all scripts and hooks. The init script writes env vars to the shell config. If the user specified a non-default vault path, also store it in the vault's `.secondbrain-installed` marker for future reference.
 
 ---
 
@@ -395,49 +418,30 @@ Print: `✓ Bundled N scheduled task templates. Run the /schedule commands above
 
 # Step 6 — Profile seeding
 
-Now seed `CLAUDE.md` and `me/profile.md` with the user's actual context. Ask 5-7 questions conversationally — phrase them like you're chatting, not filling out a form.
+**Skip this step if SCENARIO is 2 (connect) and `me/profile.md` already has real (non-placeholder) content.**
+
+Ask 2-3 quick questions. The profile builds organically through conversation — this just avoids a totally cold first session.
 
 ```
-Now I'll ask you a few quick questions so I have context. Most of these
-are 1-2 sentences. You can always edit later.
+A few quick questions so I'm not starting cold:
 
-1. What should I call you? (just your first name is fine)
+1. What should I call you?
 
-[wait for answer, store as USER_NAME]
+[wait, store as USER_NAME]
 
-2. What do you do for work or what are you focused on right now?
+2. What do you do? (work, studies, whatever takes most of your time)
 
 [wait, store as USER_ROLE]
 
-3. Anything big coming up — new job, new city, big project?
-
-[wait, store as USER_NEXT_ROLE — can be "nothing major" if blank]
-
-4. Top 3 things you're trying to make progress on right now?
-
-[wait, store — these become initial entries in brain/goals.md]
-
-5. How do you like to be talked to? Direct or gentle? Short or detailed?
+3. How do you prefer I communicate? (direct/detailed, brief/casual, etc.)
 
 [wait, store as USER_PREFERENCES]
-
-6. When do you typically wake up? (ballpark is fine — I use this to
-   schedule the morning briefing)
-
-[wait, store as WAKEUP_TIME — convert to HH:MM 24-hour format]
-
-7. Anything you definitely don't want me to track or talk about?
-
-[wait, store as USER_TABOOS — defaults to "none specified"]
 ```
 
-After all answers:
-- Replace each `{{PLACEHOLDER}}` in `CLAUDE.md` with the actual value (USER_NAME, USER_ROLE, USER_NEXT_ROLE, USER_PREFERENCES, WAKEUP_TIME)
-- For wakeup time, derive `MORNING_WINDOW` (wakeup → wakeup+90min), `AFTERNOON_WINDOW` (wakeup+90min → wakeup+8hr), `EVENING_WINDOW` (wakeup+8hr → wakeup+9.5hr) and substitute those too
-- Write the user's name, role, goals, preferences, and taboos into `me/profile.md` as a structured atomic section with wikilinks
-- Recompute the morning-briefing cron in `~/Documents/Claude/Scheduled/morning-briefing/SKILL.md` (and the corresponding `CronCreate` call) to match the user's actual wakeup time
-
-Print: `✓ Profile seeded. You can edit me/profile.md and CLAUDE.md anytime.`
+After answers:
+- Replace placeholders in `CLAUDE.md` (USER_NAME, USER_ROLE, USER_PREFERENCES)
+- Write answers into `me/profile.md` as a structured section
+- Print: `Profile seeded. It'll build up naturally from here — you can always edit me/profile.md directly.`
 
 ---
 
