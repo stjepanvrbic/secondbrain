@@ -21,8 +21,14 @@ Especially good if you have ADHD, are juggling many projects at once, or just ha
 ## Quick start — Claude Code
 
 ```
-/plugin install stjepanvrbic/secondbrain
+/plugin marketplace add stjepanvrbic/secondbrain
+/plugin install secondbrain@stjepanvrbic-secondbrain
 /secondbrain:init
+```
+
+For local development or testing from a clone:
+```bash
+claude --plugin-dir /path/to/secondbrain
 ```
 
 Then follow the prompts. The init skill automates nearly everything:

@@ -1,0 +1,14 @@
+{
+  "version": "0.1.0",
+  "plugins": [
+    {
+      "name": "secondbrain",
+      "description": "Persistent memory and scheduled life-management for Claude Code and Claude Cowork, backed by your own Obsidian vault.",
+      "version": "3.0.0",
+      "repository": "https://github.com/stjepanvrbic/secondbrain",
+      "author": {
+        "name": "stjepanvrbic"
+      }
+    }
+  ]
+}
