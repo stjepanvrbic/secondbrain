@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from init_obsidian import (
     detect_platform, is_wsl, find_obsidian, find_existing_vaults,
-    install_plugin, enable_plugins, configure_rest_api, detect_shell,
+    install_plugin, enable_plugins, configure_mcp_plugin, detect_shell,
     set_env_vars, scaffold_vault, import_notes, default_vault_path, main,
     REQUIRED_DIRS, CRITICAL_FILES, PLUGINS,
 )
@@ -128,12 +128,12 @@ class TestInstallPlugin:
 class TestEnablePlugins:
     def test_creates_file(self, tmp_vault: Path):
         (tmp_vault / ".obsidian").mkdir(exist_ok=True)
-        enable_plugins(tmp_vault, ["dataview", "obsidian-local-rest-api"])
+        enable_plugins(tmp_vault, ["dataview", "connect-mcp"])
         plugins_file = tmp_vault / ".obsidian" / "community-plugins.json"
         assert plugins_file.exists()
         data = json.loads(plugins_file.read_text())
         assert "dataview" in data
-        assert "obsidian-local-rest-api" in data
+        assert "connect-mcp" in data
 
     def test_appends_to_existing(self, tmp_vault: Path):
         (tmp_vault / ".obsidian").mkdir(exist_ok=True)
@@ -162,27 +162,27 @@ class TestEnablePlugins:
 # REST API config
 # ---------------------------------------------------------------------------
 
-class TestConfigureRestApi:
+class TestConfigureMcpPlugin:
     def test_reads_existing_config(self, tmp_vault: Path):
-        config_dir = tmp_vault / ".obsidian" / "plugins" / "obsidian-local-rest-api"
+        config_dir = tmp_vault / ".obsidian" / "plugins" / "connect-mcp"
         config_dir.mkdir(parents=True)
         (config_dir / "data.json").write_text(json.dumps({"port": 27124, "apiKey": "test-key-123"}))
 
-        port, key = configure_rest_api(tmp_vault)
+        port, key = configure_mcp_plugin(tmp_vault)
         assert port == 27124
         assert key == "test-key-123"
 
     def test_writes_default_config(self, tmp_vault: Path):
-        port, key = configure_rest_api(tmp_vault)
+        port, key = configure_mcp_plugin(tmp_vault)
         assert port == 27124
         assert key is None
-        config = tmp_vault / ".obsidian" / "plugins" / "obsidian-local-rest-api" / "data.json"
+        config = tmp_vault / ".obsidian" / "plugins" / "connect-mcp" / "data.json"
         assert config.exists()
 
     def test_dry_run(self, tmp_vault: Path):
-        port, key = configure_rest_api(tmp_vault, dry_run=True)
+        port, key = configure_mcp_plugin(tmp_vault, dry_run=True)
         assert port == 27124
-        config = tmp_vault / ".obsidian" / "plugins" / "obsidian-local-rest-api" / "data.json"
+        config = tmp_vault / ".obsidian" / "plugins" / "connect-mcp" / "data.json"
         assert not config.exists()
 
 

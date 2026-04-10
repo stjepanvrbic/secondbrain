@@ -114,6 +114,8 @@ TASK FROM "path" WHERE condition
 | `mcp__obsidian__vault_edit` | Find-and-replace text within a file |
 | `mcp__obsidian__vault_create` | Create new files (entities, archive entries) |
 | `mcp__obsidian__vault_update` | Overwrite entire file (use sparingly) |
+| `mcp__obsidian__vault_delete` | Soft-delete a note (moves to trash) |
+| `mcp__obsidian__vault_edit_line` | Insert or replace at a specific line number |
 
 ### Tool Priority (Fallback Order)
 1. **DQL query** → structured, fastest, preferred
@@ -124,6 +126,8 @@ TASK FROM "path" WHERE condition
 6. **Direct file system reads** → ONLY if Obsidian MCP is unreachable
 
 If a tool returns an error, try the next in priority. Do not retry the same failing tool.
+
+The MCP server is provided by the Connect MCP plugin (`connect-mcp`). Obsidian must be running for these tools to work. The init script launches Obsidian automatically if needed.
 
 ## Scripts
 

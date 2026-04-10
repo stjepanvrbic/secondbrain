@@ -86,7 +86,7 @@ If you're modifying a scheduled task or the `init` skill's scheduled-task instal
 
 ## What NOT to do
 
-- **Don't** add features that require new mandatory dependencies. Obsidian, Dataview, and Local REST API are already a lot. New required deps will be rejected.
+- **Don't** add features that require new mandatory dependencies. Obsidian, Dataview, and Connect MCP are already a lot. New required deps will be rejected.
 - **Don't** break backward compatibility without a major version bump and a clear migration path
 - **Don't** put hardcoded paths or personal references in any skill or template — Phase 1 of the v2.5.0 work was a big audit of these
 - **Don't** add telemetry or any kind of remote calls. The plugin runs entirely on the user's machine — that's a hard line

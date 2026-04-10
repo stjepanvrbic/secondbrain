@@ -40,14 +40,14 @@ Run all 13 checks in order. Don't stop on the first failure — collect all resu
 ## Check 4: `OBSIDIAN_MCP_PORT` env var
 
 - Check whether the env var is set and non-empty
-- If failing: "OBSIDIAN_MCP_PORT is not set. The plugin's .mcp.json depends on it. Run /secondbrain:init to set it, or add `export OBSIDIAN_MCP_PORT=\"27124\"` (or whatever port your Obsidian Local REST API is using) to your shell config."
+- If failing: "OBSIDIAN_MCP_PORT is not set. The plugin's .mcp.json depends on it. Run /secondbrain:init to set it, or add `export OBSIDIAN_MCP_PORT=\"27124\"` (or whatever port your Connect MCP plugin is using) to your shell config."
 
 ## Check 5: Obsidian process running
 
 - Best-effort check (e.g., `pgrep -i obsidian` or check for the app via `ps`)
 - If failing: "Obsidian is not running. Open /Applications/Obsidian.app and try again."
 
-## Check 6: MCP connection (Local REST API reachable)
+## Check 6: MCP connection (Connect MCP reachable)
 
 - Try `mcp__obsidian__vault_list` with path `/`
 - If failing: print the actual error and a specific fix:
@@ -113,7 +113,7 @@ secondbrain doctor report:
        Fix: add 'export OBSIDIAN_MCP_PORT="27124"' to ~/.zshrc, then source it
   ✓ Obsidian process running
   ✗ MCP connection failed (port 27124 connection refused)
-       Fix: make sure Obsidian is open AND the Local REST API plugin is enabled
+       Fix: make sure Obsidian is open AND the Connect MCP plugin is enabled
   - Vault reachable: SKIPPED (MCP connection must work first)
   - _MANIFEST.md exists: SKIPPED
   - CLAUDE.md exists: SKIPPED

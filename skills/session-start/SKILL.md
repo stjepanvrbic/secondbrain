@@ -80,7 +80,12 @@ END
 - If domain file missing but referenced in status.md: note absence, do not error
 - If entity files missing: load from glossary.md as fallback
 - Broken wikilinks: detect, log, continue (do not block context load)
-- Vault unreachable: respond with "vault inaccessible, operating on last known context"
+- Vault unreachable: Check if Obsidian is running. If not, attempt to launch it:
+  - macOS: `open -a Obsidian`
+  - Linux: `nohup obsidian &>/dev/null &`
+  - Windows: `Start-Process Obsidian`
+  Wait up to 10 seconds for the MCP server to become available, then retry.
+  If still unreachable: "Vault is inaccessible — Obsidian may not be running. Launch Obsidian and try again."
 
 # Implementation Notes
 

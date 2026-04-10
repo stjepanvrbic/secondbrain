@@ -142,4 +142,4 @@ You can switch sync methods anytime. The general pattern:
 5. **Re-open** the vault in Obsidian from the new location
 6. Run `/secondbrain:doctor` to verify everything still works
 
-The vault is just plain Markdown files — there's nothing magical about its location. The agent talks to it via the Obsidian Local REST API plugin, which doesn't care where on disk the vault lives.
+The vault is just plain Markdown files — there's nothing magical about its location. The agent talks to it via the Connect MCP plugin, which doesn't care where on disk the vault lives.

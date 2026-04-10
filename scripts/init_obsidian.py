@@ -146,6 +146,132 @@ def install_obsidian(plat: str, dry_run: bool = False) -> bool:
         return False
 
 
+def ensure_obsidian_running(plat: str, dry_run: bool = False) -> bool:
+    """Launch Obsidian if not running. Returns True if running after call."""
+    # Check if already running
+    try:
+        if plat == "macos":
+            r = subprocess.run(["pgrep", "-x", "Obsidian"], capture_output=True, timeout=5)
+        elif plat == "windows":
+            r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Obsidian.exe"],
+                             capture_output=True, text=True, timeout=5)
+            if "Obsidian.exe" in r.stdout:
+                return True
+            r.returncode = 1  # not found
+        else:  # linux
+            r = subprocess.run(["pgrep", "-x", "obsidian"], capture_output=True, timeout=5)
+        if r.returncode == 0:
+            print("  Obsidian is running")
+            return True
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    if dry_run:
+        print("  WOULD LAUNCH Obsidian")
+        return True
+
+    print("  Launching Obsidian...")
+    launch_cmds = {
+        "macos": ["open", "-a", "Obsidian"],
+        "linux": ["nohup", "obsidian"],
+        "windows": ["cmd", "/c", "start", "", "Obsidian"],
+    }
+    cmd = launch_cmds.get(plat, [])
+    try:
+        if plat == "linux":
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            subprocess.run(cmd, timeout=10)
+        # Wait for it to be ready
+        import time
+        for _ in range(15):  # up to 15 seconds
+            time.sleep(1)
+            try:
+                if plat == "macos":
+                    r = subprocess.run(["pgrep", "-x", "Obsidian"], capture_output=True, timeout=3)
+                elif plat == "windows":
+                    r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Obsidian.exe"],
+                                     capture_output=True, text=True, timeout=3)
+                    if "Obsidian.exe" in r.stdout:
+                        print("  Obsidian started")
+                        return True
+                    continue
+                else:
+                    r = subprocess.run(["pgrep", "-x", "obsidian"], capture_output=True, timeout=3)
+                if r.returncode == 0:
+                    print("  Obsidian started")
+                    return True
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+        print("  Obsidian may not have started. Check manually.")
+        return False
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"  Failed to launch Obsidian: {e}")
+        return False
+
+
+def install_plugin_via_cli(plugin_id: str, dry_run: bool = False) -> bool:
+    """Install and enable a plugin using the Obsidian CLI. Requires Obsidian running."""
+    if dry_run:
+        print(f"  WOULD RUN: obsidian plugin:install id={plugin_id} enable")
+        return True
+    try:
+        result = subprocess.run(
+            ["obsidian", f"plugin:install", f"id={plugin_id}", "enable"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            print(f"  CLI installed: {plugin_id}")
+            return True
+        # CLI might fail if plugin already installed
+        if "already installed" in result.stderr.lower() or "already installed" in result.stdout.lower():
+            print(f"  {plugin_id}: already installed")
+            return True
+        print(f"  CLI install failed: {result.stderr or result.stdout}")
+        return False
+    except FileNotFoundError:
+        return False  # CLI not available
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"  CLI install failed: {e}")
+        return False
+
+
+def ensure_node_installed(plat: str, dry_run: bool = False) -> bool:
+    """Check for Node.js/npx. Install if missing. Returns True if available."""
+    try:
+        result = subprocess.run(["npx", "--version"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            print(f"  Node.js/npx available (npx {result.stdout.strip()})")
+            return True
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        pass
+
+    print("  Node.js/npx not found — required for MCP bridge")
+    if dry_run:
+        install_cmds = {"macos": "brew install node", "linux": "sudo apt install -y nodejs npm", "windows": "winget install OpenJS.NodeJS"}
+        print(f"  WOULD RUN: {install_cmds.get(plat, 'install Node.js manually')}")
+        return True
+
+    install_cmds = {
+        "macos": ["brew", "install", "node"],
+        "linux": ["sudo", "apt", "install", "-y", "nodejs", "npm"],
+        "windows": ["winget", "install", "--id", "OpenJS.NodeJS", "--accept-source-agreements"],
+    }
+    cmd = install_cmds.get(plat)
+    if not cmd:
+        print("  Install Node.js manually: https://nodejs.org")
+        return False
+
+    print(f"  Installing Node.js: {' '.join(cmd)}")
+    try:
+        result = subprocess.run(cmd, timeout=120)
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"  Node.js install failed: {e}")
+        print("  Install manually: https://nodejs.org")
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Vault detection
 # ---------------------------------------------------------------------------
@@ -187,9 +313,9 @@ PLUGINS = {
         "repo": "blacksmithgu/obsidian-dataview",
         "id": "dataview",
     },
-    "local-rest-api": {
-        "repo": "coddingtonbear/obsidian-local-rest-api",
-        "id": "obsidian-local-rest-api",
+    "connect-mcp": {
+        "repo": "joch/obsidian-connect-mcp",
+        "id": "connect-mcp",
     },
 }
 
@@ -295,9 +421,9 @@ def enable_plugins(vault_path: Path, plugin_ids: List[str], dry_run: bool = Fals
 DEFAULT_REST_PORT = 27124
 
 
-def configure_rest_api(vault_path: Path, dry_run: bool = False) -> Tuple[Optional[int], Optional[str]]:
-    """Configure Local REST API plugin and return (port, api_key) if found."""
-    config_path = vault_path / ".obsidian" / "plugins" / "obsidian-local-rest-api" / "data.json"
+def configure_mcp_plugin(vault_path: Path, dry_run: bool = False) -> Tuple[Optional[int], Optional[str]]:
+    """Configure connect-mcp plugin and return (port, api_key) if found."""
+    config_path = vault_path / ".obsidian" / "plugins" / "connect-mcp" / "data.json"
 
     if config_path.exists():
         try:
@@ -604,12 +730,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Step 1: Detect platform
     plat = detect_platform()
     wsl = is_wsl()
-    print(f"\n[1/7] Platform: {plat}" + (" (WSL)" if wsl else ""))
+    print(f"\n[1/8] Platform: {plat}" + (" (WSL)" if wsl else ""))
     results["platform"] = plat
     results["wsl"] = wsl
 
-    # Step 2: Find or install Obsidian
-    print(f"\n[2/7] Obsidian")
+    # Step 2: Find or install Obsidian + launch
+    print(f"\n[2/8] Obsidian")
     obsidian_path = find_obsidian(plat)
     if obsidian_path:
         print(f"  Found: {obsidian_path}")
@@ -625,8 +751,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             results["errors"].append("obsidian: install failed")
             print("  Install Obsidian manually: https://obsidian.md/download")
 
+    # Step 2b: Ensure Obsidian is running
+    if not args.skip_install:
+        ensure_obsidian_running(plat, dry_run)
+
     # Step 3: Detect or create vault
-    print(f"\n[3/7] Vault")
+    print(f"\n[3/8] Vault")
     vault_path = args.vault_path
     if vault_path:
         vault_path = vault_path.expanduser().resolve()
@@ -653,7 +783,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     results["vault_path"] = str(vault_path)
 
     # Step 4: Scaffold vault structure
-    print(f"\n[4/7] Scaffold vault")
+    print(f"\n[4/8] Scaffold vault")
     created = scaffold_vault(vault_path, dry_run)
     if created:
         print(f"  Created {created} items")
@@ -677,18 +807,28 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"\n[5/8] Plugins")
     plugin_ids = []
     for name, info in PLUGINS.items():
-        ok = install_plugin(vault_path, name, info, dry_run)
-        plugin_ids.append(info["id"])
-        if ok:
-            results["steps"].append(f"plugin {name}: ok")
+        plugin_id = info["id"]
+        plugin_ids.append(plugin_id)
+        # Try CLI first (requires Obsidian running)
+        if install_plugin_via_cli(plugin_id, dry_run):
+            results["steps"].append(f"plugin {name}: ok (CLI)")
+        elif install_plugin(vault_path, name, info, dry_run):
+            results["steps"].append(f"plugin {name}: ok (download)")
         else:
             results["errors"].append(f"plugin {name}: failed")
 
     enable_plugins(vault_path, plugin_ids, dry_run)
 
-    # Step 6: Configure MCP connection
-    print(f"\n[6/7] MCP connection")
-    port, api_key = configure_rest_api(vault_path, dry_run)
+    # Step 6: Node.js
+    print(f"\n[6/8] Node.js")
+    if ensure_node_installed(plat, dry_run):
+        results["steps"].append("nodejs: ok")
+    else:
+        results["errors"].append("nodejs: not available — MCP bridge won't work")
+
+    # Step 7: MCP connection
+    print(f"\n[7/8] MCP connection")
+    port, api_key = configure_mcp_plugin(vault_path, dry_run)
 
     shell = detect_shell()
     print(f"  Shell: {shell}")
@@ -696,10 +836,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         set_env_vars(port, api_key, shell, dry_run)
         results["steps"].append(f"env vars: port={port}")
     else:
-        results["errors"].append("rest api: no config")
+        results["errors"].append("mcp plugin: no config")
 
-    # Step 7: Verify
-    print(f"\n[7/7] Verify")
+    # Step 8: Verify
+    print(f"\n[8/8] Verify")
     if dry_run:
         print("  WOULD RUN: verify_vault.py + rebuild_manifest.py")
     else:
@@ -728,7 +868,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"\nVault: {vault_path}")
 
     if not api_key:
-        print("\nNext step: Open Obsidian, enable the Local REST API plugin,")
+        print("\nNext step: Open Obsidian, enable the connect-mcp plugin,")
         print("then re-run this script to pick up the generated API key.")
 
     # Write marker inside the vault (not home dir — avoids polluting user env during tests)

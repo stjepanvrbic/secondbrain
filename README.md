@@ -27,7 +27,7 @@ Especially good if you have ADHD, are juggling many projects at once, or just ha
 
 Then follow the prompts. The init skill automates nearly everything:
 - Installs Obsidian if missing (`brew`, `snap`, or `winget` depending on platform)
-- Downloads and installs the Dataview and Local REST API plugins from GitHub
+- Downloads and installs the Dataview and Connect MCP plugins from GitHub
 - Reads the API key and port from plugin config
 - Writes environment variables to your shell config (zsh/bash/fish/PowerShell)
 - Scaffolds your vault with starter files
@@ -67,7 +67,7 @@ Init is mostly automated via `scripts/init_obsidian.py`. You don't need to know 
 2. **Install Obsidian** — via `brew` (macOS), `snap` (Linux), or `winget` (Windows), skipped if already installed
 3. **Detect or create vault** — finds existing Obsidian vaults, or creates `~/secondbrain-vault`
 4. **Scaffold vault structure** — creates `brain/`, `entities/`, `me/`, `inbox/`, `archive/`, `scratch/` and all critical files
-5. **Install plugins** — downloads Dataview and Local REST API from GitHub releases into `.obsidian/plugins/`
+5. **Install plugins** — downloads Dataview and Connect MCP from GitHub releases into `.obsidian/plugins/`
 6. **Configure MCP connection** — reads API key and port from plugin config, writes env vars to your shell config
 7. **Verify** — runs `verify_vault.py` and `rebuild_manifest.py` to confirm everything is valid
 
@@ -170,7 +170,7 @@ The plugin ships 14 skills. Most run automatically — you rarely invoke them by
 
 ### "OBSIDIAN_MCP_PORT is not set" / MCP can't connect
 
-The plugin's `.mcp.json` references `${OBSIDIAN_MCP_PORT}` (and `${OBSIDIAN_API_KEY}`). Both must be set in your shell environment before Claude Code/Cowork starts. Run `/secondbrain:init` and it'll walk you through setting them. Or set them manually:
+The plugin's `.mcp.json` references `${OBSIDIAN_MCP_PORT}` (and `${OBSIDIAN_API_KEY}`). Both must be set in your shell environment before Claude Code/Cowork starts. These values come from the Connect MCP plugin settings in Obsidian. Run `/secondbrain:init` and it'll walk you through setting them. Or set them manually:
 
 ```bash
 echo 'export OBSIDIAN_API_KEY="<your-key>"' >> ~/.zshrc
@@ -231,6 +231,6 @@ MIT. See [LICENSE](LICENSE) for full text.
 ## Credits
 
 - [Andrej Karpathy's gist on personal LLM wikis](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — three-layer model and index/log navigation pattern
-- [Obsidian](https://obsidian.md) and the [Local REST API plugin](https://github.com/coddingtonbear/obsidian-local-rest-api) — vault storage and MCP bridge
+- [Obsidian](https://obsidian.md) and the [Connect MCP plugin](https://github.com/joch/obsidian-connect-mcp) — vault storage and MCP bridge
 - [Dataview](https://blacksmithgu.github.io/obsidian-dataview/) — DQL query layer
 - The Claude Code and Claude Cowork teams at Anthropic for the plugin and skill systems

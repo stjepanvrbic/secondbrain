@@ -97,7 +97,7 @@ Check each of these and store the result:
 | Check | How |
 |---|---|
 | Obsidian installed? | `ls /Applications/Obsidian.app` (Mac), equivalent on Linux/Windows |
-| Connect MCP (Local REST API) plugin installed? | Best-effort: look for `obsidian-local-rest-api` directory under any Obsidian vault config in `~/Library/Application Support/obsidian/` (Mac) |
+| Connect MCP plugin installed? | Best-effort: look for `connect-mcp` directory under any Obsidian vault config in `~/Library/Application Support/obsidian/` (Mac) |
 | `OBSIDIAN_API_KEY` env var set? | Check via env var inspection (the MCP loader will show it as substituted in the connection URL if set) |
 | `OBSIDIAN_MCP_PORT` env var set? | Same — check for substitution. If not set, the plugin's `.mcp.json` will fail to resolve the URL |
 | Existing vault? | Try `mcp__obsidian__vault_list` with path `/` — if it returns, a vault exists |
@@ -159,18 +159,25 @@ When you're done, type "ready".
 
 Wait for "ready". Then re-check.
 
-## 2c. Connect MCP (Local REST API) plugin missing
+## 2c. Connect MCP plugin missing
+
+The init script installs the Connect MCP plugin automatically using the 
+Obsidian CLI: `obsidian plugin:install id=connect-mcp enable`
+
+If the CLI isn't available, the script downloads the plugin from GitHub 
+and places it in .obsidian/plugins/connect-mcp/.
+
+If automatic installation fails, walk the user through manual install:
 
 ```
-You need the Local REST API plugin so I can read and write your vault.
+You need the Connect MCP plugin so I can read and write your vault.
 
 1. In Obsidian, Settings → Community plugins → Browse
-2. Search for: Local REST API
-3. Click the one by Adam Coddington
-4. Install → Enable
+2. Search for: Connect MCP
+3. Install → Enable
 
 After it's enabled, scroll back to "Community plugins" → click the gear
-icon next to "Local REST API" to open its settings.
+icon next to "Connect MCP" to open its settings.
 
 You should see an "API Key" field with a long random string. Click the
 copy button to copy it. We'll use it in the next step.
@@ -219,12 +226,11 @@ After the user confirms, re-check that `OBSIDIAN_API_KEY` is now visible.
 ## 2e. `OBSIDIAN_MCP_PORT` not set
 
 ```
-The Local REST API plugin runs on a port number. By default it's 27124,
+The Connect MCP plugin runs on a port number. By default it's 27124,
 but yours might be different.
 
 To check: in Obsidian, Settings → Community plugins → click the gear
-icon next to "Local REST API". The "HTTP Server Port" is the number
-you want.
+icon next to "Connect MCP". The port number is in the plugin's settings.
 
 What's your port number? (just the number, e.g., 27124)
 ```
@@ -278,8 +284,8 @@ Call `mcp__obsidian__vault_list` with path `/`.
 - **If success:** Print `✓ Connection works! I can see your vault.` Proceed to Step 4.
 - **If failure:** Diagnose specifically:
   - Connection refused? → "Obsidian isn't running. Open Obsidian and try again."
-  - 401/403? → "API key is wrong. Re-check the key in Obsidian's Local REST API settings vs what's in your shell config."
-  - Wrong port? → "The port doesn't match. Re-check `OBSIDIAN_MCP_PORT` against Obsidian's Local REST API port."
+  - 401/403? → "API key is wrong. Re-check the key in Obsidian's Connect MCP settings vs what's in your shell config."
+  - Wrong port? → "The port doesn't match. Re-check `OBSIDIAN_MCP_PORT` against Obsidian's Connect MCP port."
   - Other? → Print the actual error and a generic troubleshooting checklist.
 
 Loop: re-prompt the user to fix and try again. Don't proceed until the connection works.

@@ -187,7 +187,7 @@ In Claude Code, `init` calls `CronCreate` directly to register these. In Cowork 
 
 ## Why Obsidian + Dataview
 
-The wiki layer is a directory of Markdown files. The agent reads/writes them via the [Obsidian Local REST API plugin](https://github.com/coddingtonbear/obsidian-local-rest-api) (a.k.a. "Connect MCP"). The plugin's `.mcp.json` configures the connection.
+The wiki layer is a directory of Markdown files. The agent reads/writes them via the [Connect MCP plugin](https://github.com/joch/obsidian-connect-mcp). The plugin's `.mcp.json` configures the connection.
 
 [Dataview](https://blacksmithgu.github.io/obsidian-dataview/) is required because the plugin uses inline metadata (`[due:: 2026-04-15]`, `[energy:: high]`, `[est:: 30min]`) on tasks, which Dataview indexes for queryability. The `knowledge-search` skill can run DQL queries like "all tasks due in the next 7 days" or "all entities tagged with #immigration."
 
@@ -210,6 +210,6 @@ The one ambient leak vector is Anthropic's LLM API: every time the agent reads a
 ## Credits
 
 - [Andrej Karpathy's gist on personal LLM wikis](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — three-layer model, index/log navigation pattern, "human curates, LLM maintains" principle
-- [Obsidian](https://obsidian.md) and the [Local REST API plugin](https://github.com/coddingtonbear/obsidian-local-rest-api) — vault storage and MCP bridge
+- [Obsidian](https://obsidian.md) and the [Connect MCP plugin](https://github.com/joch/obsidian-connect-mcp) — vault storage and MCP bridge
 - [Dataview](https://blacksmithgu.github.io/obsidian-dataview/) — DQL query layer
 - The Claude Code and Claude Cowork teams at Anthropic for the plugin and skill systems
