@@ -355,7 +355,30 @@ After vault setup, the VAULT_PATH must be available to all scripts and hooks. Th
 
 ---
 
-# Step 5 — Automatic scheduled task installation (environment-specific)
+# Step 5 — Scheduled task installation
+
+## 5-pre. Ask about scheduled task ownership
+
+If the user is connecting to an existing vault (Scenario 2), ask:
+
+```
+Are scheduled tasks (morning briefing, dream protocol, etc.) already
+managed by another instance — for example, a Cowork session?
+
+  1. Yes — another instance handles scheduling (skip task installation)
+  2. No — set up scheduled tasks on this instance
+
+Which one? (1 or 2)
+```
+
+If the user picks **1 (another instance manages scheduling)**:
+- Skip all scheduled task installation
+- Print: `Skipping scheduled tasks — managed elsewhere. You can still run any skill manually (e.g., /secondbrain:morning-brief).`
+- Proceed to Step 6
+
+If the user picks **2 (set up here)**, or if this is a fresh install (Scenario 1), continue with task installation below.
+
+## 5a. Task selection
 
 Read `@${CLAUDE_PLUGIN_ROOT}/scheduled-tasks/MANIFEST.md` for the bundled tasks.
 
