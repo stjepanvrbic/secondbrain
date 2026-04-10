@@ -321,14 +321,61 @@ Type the path (e.g., ~/vault, ~/cowork, /Users/you/Obsidian/secondbrain):
 
 After the user provides a path:
 1. Verify the path exists and is a directory
-2. Check for secondbrain markers: `_MANIFEST.md`, `brain/status.md`, `entities/`
-3. If markers found: this is a secondbrain vault — print `Found secondbrain vault at <path>.`
-4. If markers missing: this is an Obsidian vault but not a secondbrain vault. Run `scripts/init_obsidian.py --vault-path "<path>" --skip-install` to fill in missing scaffolding (the script never overwrites existing files)
-5. Wire the MCP connection to point to this vault
-6. Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "<path>"` to check health
-7. Skip profile seeding (Step 6) if `me/profile.md` already has real content
+2. Check for secondbrain markers: `brain/status.md`, `entities/`
+3. If markers found: print `Found secondbrain vault at <path>.`
+4. Wire the MCP connection to point to this vault
+5. Skip profile seeding (Step 6) if `me/profile.md` already has real content
 
-This is the path for users who already have a vault on another device (synced via Obsidian Sync, iCloud, etc.) or who are installing the plugin in Claude Code after using it in Cowork.
+### 4b-health. Vault health check and migration (MANDATORY for Scenario 2)
+
+**After connecting, ALWAYS run a full health check and clearly report results to the user.**
+
+1. **Fill missing scaffolding:** Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/init_obsidian.py --vault-path "<path>" --skip-install` to create any missing directories or files (log.md, _MANIFEST.md, etc.). This never overwrites existing content.
+
+2. **Run verification:** `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "<path>" --json`
+
+3. **Report results clearly to the user:**
+```
+Vault health check:
+  - N broken wikilinks
+  - N missing entity files  
+  - N duplicate headings
+  - N stale inbox items (processed but not archived)
+  - _MANIFEST.md: missing/outdated
+  - brain/commitments.md: present (deprecated in v3.0 — replaced by status.md)
+  - etc.
+```
+
+4. **Detect v2.x → v3.0 migration needs and explain them:**
+   - If `brain/commitments.md` exists: "commitments.md is deprecated in v3.0. brain/status.md is now the single source of truth for tasks. I'll archive commitments.md to archive/ and ensure status.md has all active tasks."
+   - If inbox has items with `[processed:: true]` still in inbox/: "v3.0 moves processed inbox items to archive/inbox/ instead of marking them in place. I'll move N processed items to archive."
+   - If `_MANIFEST.md` is missing or stale: "I'll rebuild the manifest."
+   - If `log.md` is missing: "I'll create log.md."
+
+5. **Ask permission before fixing:**
+```
+I found N issues. Want me to fix them now?
+
+  1. Yes — fix everything (recommended)
+  2. Show me details first
+  3. Skip — I'll deal with it later
+
+Which one? (1, 2, or 3)
+```
+
+6. **If user says yes (or after showing details):**
+   - Archive `brain/commitments.md` → `archive/commitments-v2.md` (never delete)
+   - Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py "<path>"` to move processed inbox items
+   - Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rebuild_manifest.py "<path>"`
+   - Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "<path>" --fix` for auto-fixable issues (duplicate headings)
+   - Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py "<path>" --from-json <verify-output>` for missing entities
+   - Print summary of what was fixed
+
+7. **Run dream-protocol to consolidate:**
+   After fixes, tell the user: "I'll run the dream-protocol skill to consolidate the vault and ensure everything is consistent with the v3.0 structure."
+   Invoke `/secondbrain:dream-protocol`.
+
+This is the path for users who already have a vault on another device (synced via Obsidian Sync, iCloud, etc.) or who are installing the plugin in Claude Code after using it in Cowork. **The vault may have been built under an older plugin version, so migration and health checks are essential.**
 
 ## 4c. Scenario 3 — Import existing notes
 
