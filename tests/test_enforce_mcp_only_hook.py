@@ -587,7 +587,6 @@ class TestSecurityBypasses:
         the command's literal path never matches.
         """
         import tempfile
-        import os
 
         raw_root = tempfile.mkdtemp(prefix="sb_symlink_test_")
         try:
