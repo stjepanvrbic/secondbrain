@@ -49,8 +49,8 @@ class TestReadCurrentVersion:
     def test_reads_from_plugin_json(self):
         v = read_current_version()
         assert v.count(".") == 2
-        major, _minor, _patch = parse_version(v)
-        assert major >= 3
+        parsed = parse_version(v)
+        assert parsed[0] >= 3
 
 
 class TestSetVersion:
@@ -83,7 +83,7 @@ class TestSetVersion:
             """))
 
         # Patch the module-level paths
-        import bump_version  # type: ignore[reportMissingImports]
+        import bump_version  # pyright: ignore[reportMissingImports]
         orig_root = bump_version.REPO_ROOT
         orig_files = bump_version.VERSION_FILES
         orig_skills = bump_version.SKILLS_DIR
@@ -130,7 +130,7 @@ class TestSetVersion:
             "plugins": [{"name": "test", "version": "2.0.0", "source": "./"}]
         }))
 
-        import bump_version  # type: ignore[reportMissingImports]
+        import bump_version  # pyright: ignore[reportMissingImports]
         orig_files = bump_version.VERSION_FILES
         orig_skills = bump_version.SKILLS_DIR
 
@@ -169,7 +169,7 @@ class TestMain:
             "plugins": [{"name": "test", "version": "1.0.0", "source": "./"}]
         }))
 
-        import bump_version  # type: ignore[reportMissingImports]
+        import bump_version  # pyright: ignore[reportMissingImports]
         orig_root = bump_version.REPO_ROOT
         orig_files = bump_version.VERSION_FILES
         orig_skills = bump_version.SKILLS_DIR

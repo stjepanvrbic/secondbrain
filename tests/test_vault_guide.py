@@ -81,7 +81,7 @@ class TestGetUpcomingDeadlines:
 
 class TestCountInbox:
     def test_empty_inbox(self, tmp_vault: Path):
-        total, _unprocessed = count_inbox(tmp_vault)
+        total, _ = count_inbox(tmp_vault)
         assert total == 0
 
     def test_with_files(self, populated_vault: Path):
