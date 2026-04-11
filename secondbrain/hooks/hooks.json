@@ -34,6 +34,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-immutability-bash.sh\"",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [

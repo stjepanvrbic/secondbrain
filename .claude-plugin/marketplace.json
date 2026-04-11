@@ -11,7 +11,7 @@
     {
       "name": "secondbrain",
       "description": "Persistent memory and scheduled life-management for Claude Code and Claude Cowork, backed by your own Obsidian vault.",
-      "version": "3.2.4",
+      "version": "3.2.5",
       "source": "./secondbrain",
       "author": {
         "name": "Stjepan Vrbic"

@@ -4,18 +4,26 @@ This plugin works in both Claude Code (CLI) and Claude Cowork (Desktop). They sh
 
 ## Immutable directories (hard rule)
 
-`inbox/` and `archive/` are **immutable via MCP**. A PreToolUse hook (`hooks/enforce-immutability.sh`) blocks any `vault_create`, `vault_update`, `vault_patch`, `vault_edit`, `vault_edit_line`, or `vault_delete` call targeting a path inside these directories.
+`inbox/` and `archive/` are **immutable**. Two PreToolUse hooks enforce this:
 
-**Why:** raw input and historical data should never be mutated by the agent. This prevents accidental corruption and maintains a reliable audit trail.
+1. **`hooks/enforce-immutability.sh`** — blocks MCP vault writes (`vault_create`, `vault_update`, `vault_patch`, `vault_edit`, `vault_edit_line`, `vault_delete`) targeting paths inside inbox/ or archive/.
+
+2. **`hooks/enforce-immutability-bash.sh`** — blocks Bash write operations (`mv`, `rm`, `cp`, `touch`, `sed -i`, `tee`, `> redirection`) targeting inbox/ or archive/.
+
+**Why:** raw input and historical data should never be mutated by the agent. This prevents accidental corruption, maintains a reliable audit trail, and forces content to flow through the sanctioned ingest → archive pipeline.
 
 **The only sanctioned ways to modify inbox/ and archive/:**
-- **Adding to inbox/** — user actions (Obsidian UI, Finder, brain dumps that create new files). These happen outside MCP so they're not blocked.
-- **Moving from inbox/ to archive/inbox/** — `scripts/archive_inbox.py` (filesystem operations, bypasses MCP hook)
-- **Moving deprecated files to inbox/** — `scripts/migrate_v2_to_v3.py` (filesystem operations, bypasses MCP hook)
+- **Adding to inbox/** — user actions outside the agent (Obsidian UI, Finder, external tools)
+- **Moving files into inbox/** — `scripts/migrate_v2_to_v3.py` (direct filesystem operations, recognized by the Bash hook as a sanctioned script)
+- **Moving files from inbox/ to archive/inbox/** — `scripts/archive_inbox.py` (same)
 
-If the agent tries to write to inbox/ or archive/ via any MCP tool, the hook returns exit code 2 and the operation is blocked with an actionable error message pointing to the correct sanctioned path.
+**Read operations are always allowed** — `ls`, `cat`, `grep`, `find`, `head`, `tail`, `wc`, `stat`, etc. on inbox/ and archive/ paths are not blocked.
 
-This is tested by `tests/test_enforce_immutability.py` — 28 tests covering allowed paths, blocked inbox operations, blocked archive operations, and graceful failure on malformed input.
+If the agent attempts a blocked operation, the hook returns exit code 2 with an actionable error message pointing to the correct sanctioned script.
+
+**Tests:**
+- `tests/test_enforce_immutability.py` — 28 tests for MCP hook (allowed paths, blocked MCP tools, errors, malformed input)
+- `tests/test_enforce_immutability_bash.py` — 44 tests for Bash hook (reads allowed, unrelated commands allowed, sanctioned scripts allowed, blocked writes via mv/rm/cp/redirection/sed/touch, edge cases)
 
 ## How to detect the environment
 
