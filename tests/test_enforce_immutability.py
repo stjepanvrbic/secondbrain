@@ -134,6 +134,52 @@ class TestBlocksArchive:
         assert code == 2
 
 
+class TestBlocksHotMemory:
+    """brain/hot-memory.md is maintained exclusively by update_hot_memory.py."""
+
+    def test_create_hot_memory(self):
+        code, _, stderr = run_hook("mcp__obsidian__vault_create", "brain/hot-memory.md")
+        assert code == 2
+        assert "BLOCKED" in stderr
+        assert "hot-memory" in stderr.lower()
+
+    def test_update_hot_memory(self):
+        code, _, stderr = run_hook("mcp__obsidian__vault_update", "brain/hot-memory.md")
+        assert code == 2
+        assert "update_hot_memory.py" in stderr
+
+    def test_patch_hot_memory(self):
+        code, _, _ = run_hook("mcp__obsidian__vault_patch", "brain/hot-memory.md")
+        assert code == 2
+
+    def test_edit_hot_memory(self):
+        code, _, _ = run_hook("mcp__obsidian__vault_edit", "brain/hot-memory.md")
+        assert code == 2
+
+    def test_delete_hot_memory(self):
+        code, _, _ = run_hook("mcp__obsidian__vault_delete", "brain/hot-memory.md")
+        assert code == 2
+
+    def test_leading_slash_hot_memory(self):
+        code, _, _ = run_hook("mcp__obsidian__vault_create", "/brain/hot-memory.md")
+        assert code == 2
+
+    def test_other_brain_files_not_blocked(self):
+        """Files in brain/ other than hot-memory.md should still be allowed."""
+        code, _, _ = run_hook("mcp__obsidian__vault_patch", "brain/status.md")
+        assert code == 0
+        code, _, _ = run_hook("mcp__obsidian__vault_patch", "brain/deadlines.md")
+        assert code == 0
+
+    def test_similar_but_different_path_not_blocked(self):
+        """Files that happen to contain 'hot-memory' in the name but aren't brain/hot-memory.md."""
+        code, _, _ = run_hook("mcp__obsidian__vault_create", "brain/hot-memory-notes.md")
+        assert code == 0
+        code, _, _ = run_hook("mcp__obsidian__vault_create", "archive/hot-memory-old.md")
+        # Note: this is blocked not by the hot-memory check but by the archive check.
+        assert code == 2
+
+
 class TestErrorMessages:
     """Error messages should be actionable."""
 

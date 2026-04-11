@@ -64,6 +64,21 @@ Never write, patch, edit, or delete anything in archive/ via MCP tools.
 EOF
         exit 2
         ;;
+    brain/hot-memory.md)
+        cat <<'EOF' >&2
+BLOCKED: brain/hot-memory.md is maintained exclusively by update_hot_memory.py.
+
+Hot memory is a derived artifact — a compact fact index the ingester
+rebuilds after each session. Direct MCP writes would overwrite the
+ingester's work on the next run and break session-start context loading.
+
+If you need to refresh hot-memory, run:
+  python3 scripts/update_hot_memory.py <vault>
+
+Never write, patch, edit, or delete brain/hot-memory.md via MCP tools.
+EOF
+        exit 2
+        ;;
 esac
 
 exit 0
