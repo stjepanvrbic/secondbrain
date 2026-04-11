@@ -177,14 +177,26 @@ def ensure_obsidian_running(plat: str, dry_run: bool = False) -> bool:
         "windows": ["cmd", "/c", "start", "", "Obsidian"],
     }
     cmd = launch_cmds.get(plat, [])
+    # Hard cap on the foreground wait. If Obsidian isn't up in 60s something
+    # is wrong (headless Linux, crash-on-startup, wedged machine) and the
+    # user needs a clear message — not a silent hang.
+    LAUNCH_TIMEOUT_SECONDS = 60
+    TIMEOUT_MESSAGE = (
+        "Obsidian did not launch within 60 seconds. Possible causes: "
+        "(a) headless Linux environment (init requires a desktop session, "
+        "not SSH-only); (b) Obsidian crashed during startup — try launching "
+        "manually and re-running init; (c) slow machine — re-run init once "
+        "Obsidian is ready."
+    )
     try:
         if plat == "linux":
             subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
             subprocess.run(cmd, timeout=10)
-        # Wait for it to be ready
+        # Wait for it to be ready — poll once per second up to LAUNCH_TIMEOUT_SECONDS.
         import time
-        for _ in range(15):  # up to 15 seconds
+        deadline = time.monotonic() + LAUNCH_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
             time.sleep(1)
             try:
                 if plat == "macos":
@@ -203,7 +215,7 @@ def ensure_obsidian_running(plat: str, dry_run: bool = False) -> bool:
                     return True
             except (OSError, subprocess.TimeoutExpired):
                 continue
-        print("  Obsidian may not have started. Check manually.")
+        print(f"  {TIMEOUT_MESSAGE}")
         return False
     except (OSError, subprocess.SubprocessError) as e:
         print(f"  Failed to launch Obsidian: {e}")

@@ -7,7 +7,7 @@ description: >
   Performs a reflective consolidation pass over the vault — orienting on current
   state, gathering recent signal, consolidating changes, and verifying integrity.
 metadata:
-  version: "3.3.5"
+  version: "3.3.6"
 ---
 
 # Core Rule
@@ -127,10 +127,20 @@ Next session recommended focus: [[domain-name]]
 - verify-vault.py not found: skip verification, note in output
 - Manifest missing: rebuild from scratch (this IS the cold start path)
 
+# Auto-Invocation Policy
+
+**Auto-invocation is FORBIDDEN.** The agent must never decide on its own to run this skill during a normal session. Allowed invocations are limited to:
+
+- The nightly scheduled task at ~2am (primary path)
+- `init` during Scenario 2 (connect existing vault) setup
+- Explicit user request ("run dream protocol", "run vault maintenance", "run nightly maintenance", "consolidate")
+
+Agent-initiated runs during a normal session are forbidden because dream-protocol mutates many files in bulk and would surprise the user. If you think the vault needs consolidation mid-session, surface the observation — do not act on it.
+
 # Forbidden Actions
 
 - Modifying `me/profile.md` or any legacy plugin-generated `CLAUDE.md` at the vault root
 - Deleting any files (move to archive, never delete)
-- Running during normal sessions (unless invoked by init)
+- Self-triggering during a normal session (see Auto-Invocation Policy above)
 - Committing without descriptive message
 - Exhaustively reading every file (use DQL queries)

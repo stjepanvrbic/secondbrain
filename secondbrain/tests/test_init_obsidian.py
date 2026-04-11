@@ -13,6 +13,7 @@ from init_obsidian import (
     detect_platform, is_wsl, find_obsidian, find_existing_vaults,
     install_plugin, enable_plugins, configure_mcp_plugin, detect_shell,
     set_env_vars, scaffold_vault, import_notes, default_vault_path, main,
+    ensure_obsidian_running,
     REQUIRED_DIRS, CRITICAL_FILES, PLUGINS,
 )
 
@@ -98,6 +99,59 @@ class TestFindExistingVaults:
         (config_dir / "obsidian.json").write_text("not json")
         with patch.dict("init_obsidian.OBSIDIAN_CONFIG_PATHS", {"macos": config_dir}):
             assert find_existing_vaults("macos") == []
+
+
+# ---------------------------------------------------------------------------
+# ensure_obsidian_running — launch + timeout
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureObsidianRunningTimeout:
+    """The foreground launch wait is capped at 60 seconds (Theme 5.1).
+
+    We don't test the happy path here — that's exercised indirectly by the
+    full-run tests. What we test is: if Obsidian never shows up, the function
+    returns False instead of hanging forever, and the user sees the specific
+    error message the spec mandates.
+    """
+
+    def test_dry_run_short_circuits(self):
+        # dry_run path should never shell out to pgrep or tasklist
+        with patch("subprocess.run") as run_mock, patch("subprocess.Popen") as popen_mock:
+            run_mock.return_value = MagicMock(returncode=1)
+            result = ensure_obsidian_running("macos", dry_run=True)
+            assert result is True
+            popen_mock.assert_not_called()
+
+    def test_timeout_returns_false_with_message(self, capsys):
+        # Simulate Obsidian never appearing. pgrep always returns rc=1,
+        # time.monotonic ticks forward in 10-second jumps so the loop bails
+        # after ~6 iterations instead of taking an actual minute.
+        fake_clock = {"now": 1000.0}
+
+        def fake_monotonic():
+            fake_clock["now"] += 10.0
+            return fake_clock["now"]
+
+        def fake_run(cmd, *args, **kwargs):
+            # pgrep never finds Obsidian; `open -a` launch "succeeds"
+            mock = MagicMock()
+            mock.returncode = 0 if cmd[:2] == ["open", "-a"] else 1
+            mock.stdout = ""
+            return mock
+
+        with patch("time.monotonic", side_effect=fake_monotonic), \
+             patch("time.sleep"), \
+             patch("subprocess.run", side_effect=fake_run):
+            result = ensure_obsidian_running("macos")
+
+        assert result is False
+        out = capsys.readouterr().out
+        assert "did not launch within 60 seconds" in out
+        # Make sure all three diagnostic hints appear
+        assert "headless Linux" in out
+        assert "crashed during startup" in out
+        assert "slow machine" in out
 
 
 # ---------------------------------------------------------------------------

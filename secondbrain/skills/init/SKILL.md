@@ -12,7 +12,7 @@ description: >
   Supports a `--verify` mode that runs verification only (no creates,
   no installs) for diagnosing existing installs.
 metadata:
-  version: "3.3.5"
+  version: "3.3.6"
 ---
 
 # Core Rule
@@ -565,6 +565,14 @@ matters, the syntax around it is just how you tell Cowork.
 After running these in Cowork, all 6 scheduled tasks will be active.
 They run when Claude Desktop is open and your computer is awake.
 ```
+
+3. **Confirm registration before proceeding.** Cowork is out-of-band — the skill has no way to query whether the `/schedule` commands were actually accepted. Block here until the user acknowledges:
+
+```
+Confirm: did you paste all 6 commands into Cowork chat and see them accepted? [y/n]
+```
+
+If the user answers `y`, continue. If `n` (or anything else), re-print the 6 commands and ask again. Do not advance to Step 6 until the user confirms `y`. If the user says they want to skip scheduled tasks entirely after seeing them, treat it as the 5a "skip" path and print the same "managed elsewhere" message.
 
 Print: `✓ Bundled N scheduled task templates. Run the /schedule commands above to activate them.`
 
