@@ -7,7 +7,7 @@ description: >
   Performs a reflective consolidation pass over the vault — orienting on current
   state, gathering recent signal, consolidating changes, and verifying integrity.
 metadata:
-  version: "3.3.8"
+  version: "3.4.0"
 ---
 
 # Core Rule
@@ -95,6 +95,27 @@ Inbox: X processed. Session signal: X items extracted. Tasks: X archived, X prom
 ```
 
 This is append-only — never edit existing entries. The log.md format is documented in `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
+
+# Phase 6 — Commit nightly state
+
+After Phase 5's log.md append, commit any uncommitted vault changes from the night's work as a single nightly checkpoint. This is the same `commit-stop` subcommand the Stop hook uses per turn, so the nightly commit is consistent with the per-turn commits in style and author identity.
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vault_git.py commit-stop \
+    --vault "${VAULT_PATH}" \
+    --message "dream-protocol nightly checkpoint"
+```
+
+**Git is opt-in.** If `vault_git.py` reports that the vault is not a git repo (exit non-zero with `not a git repo`), **skip silently** — the user opted out of git during init and the nightly run should not complain. Do not print an error, do not surface it to the user, and do not attempt to `vault_git.py init` on their behalf.
+
+**Fail soft on real errors.** If `commit-stop` fails for any reason other than "not a git repo" (missing git binary, permission issue, file system weirdness, etc.), log the stderr verbatim to `log.md` as:
+
+```markdown
+## [YYYY-MM-DD HH:MM] dream-protocol | commit-stop failed
+<captured stderr>
+```
+
+Then continue. dream-protocol should **never hard-fail** on a commit issue — the vault content is already on disk from Phases 1-5, so the night's work is durable regardless of whether the commit landed. Doctor or the next Stop hook invocation will retry the commit.
 
 # Execution Timing
 
