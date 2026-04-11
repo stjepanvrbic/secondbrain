@@ -2,3 +2,6 @@
 excalidraw.log
 __pycache__/
 .pytest_cache/
+
+# Worktrees
+.worktrees/
