@@ -32,6 +32,11 @@ updated: {date}
 """
 
 
+def sanitize_name(name: str) -> str:
+    """Strip trailing backslashes and invalid filename characters."""
+    return name.strip().rstrip("\\").replace("\\", "").strip()
+
+
 def kebab_to_display(name: str) -> str:
     return " ".join(word.capitalize() for word in name.split("-"))
 
@@ -56,7 +61,10 @@ def create_stubs(vault: Path, names: List[str]) -> int:
     today = date.today().isoformat()
     created = 0
 
-    for name in names:
+    for raw_name in names:
+        name = sanitize_name(raw_name)
+        if not name:
+            continue
         target = entities_dir / f"{name}.md"
         if target.exists():
             print(f"SKIP {target.relative_to(vault)} (already exists)")

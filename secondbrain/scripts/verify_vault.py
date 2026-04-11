@@ -202,11 +202,14 @@ class VaultIndex:
 # ---------------------------------------------------------------------------
 
 def parse_wikilink(raw: str) -> Tuple[str, str]:
-    """Parse '[[target|alias]]' or '[[target#section]]' into (target, section)."""
-    target = raw.split("|")[0].strip()
+    """Parse '[[target|alias]]' or '[[target#section]]' into (target, section).
+
+    Handles escaped pipes ([[target\\|alias]]) by stripping the trailing backslash.
+    """
+    target = raw.split("|")[0].strip().rstrip("\\")
     if "#" in target:
         parts = target.split("#", 1)
-        return parts[0].strip(), parts[1].strip()
+        return parts[0].strip().rstrip("\\"), parts[1].strip()
     return target, ""
 
 

@@ -12,7 +12,7 @@ description: >
   Supports a `--verify` mode that runs verification only (no creates,
   no installs) for diagnosing existing installs.
 metadata:
-  version: "3.2.2"
+  version: "3.2.3"
 ---
 
 # Core Rule
@@ -393,23 +393,27 @@ If user picks **1**: proceed to Substep 6.
 
 #### Substep 6: Execute fixes in order
 
+**Migration philosophy:** Deprecated files get moved to `inbox/` so dream-protocol re-ingests them through the current routing rules. This ensures nothing is lost AND content lands wherever it belongs in the v3 structure — not hardcoded to specific files.
+
 Run each command and report pass/fail:
 
-1. If `brain/commitments.md` exists: move it to `archive/commitments-v2.md` via vault_patch or shell `mv`
-2. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py "<path>"`
-3. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rebuild_manifest.py "<path>"`
-4. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "<path>" --fix --json` (auto-fixes duplicate headings)
-5. For each missing entity in the verify output: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py "<path>" <entity-name>` (or pass `--from-json <file>`)
+1. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/migrate_v2_to_v3.py "<path>"` — moves any deprecated files (like brain/commitments.md) into inbox/ for re-ingestion
+2. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py "<path>"` — moves already-processed inbox items (`[processed:: true]`) to archive/inbox/
+3. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rebuild_manifest.py "<path>"` — regenerates _MANIFEST.md
+4. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "<path>" --fix --json` — auto-fixes duplicate headings
+5. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "<path>" --json > /tmp/sb-verify.json` then `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py "<path>" --from-json /tmp/sb-verify.json` — creates missing entity stubs
 
 Print summary:
 ```
 Fixed:
-  - Archived commitments.md
-  - Moved N processed inbox items to archive/inbox/
+  - Moved N deprecated files to inbox for re-ingestion
+  - Archived N processed inbox items to archive/inbox/
   - Rebuilt _MANIFEST.md
   - Auto-fixed N duplicate headings
   - Created N entity stubs
 ```
+
+**Substep 7 (dream-protocol) will ingest the files moved to inbox, routing their content to the right places.**
 
 #### Substep 7: Run dream-protocol to consolidate
 

@@ -82,6 +82,13 @@ class TestWikilinkParsing:
     def test_empty(self):
         assert parse_wikilink("") == ("", "")
 
+    def test_escaped_pipe(self):
+        """Handle '[[entities/name\\|Alias]]' — the backslash that broke create_entity_stubs."""
+        assert parse_wikilink("entities/name\\|Alias") == ("entities/name", "")
+
+    def test_escaped_pipe_with_section(self):
+        assert parse_wikilink("entities/name\\#Section") == ("entities/name", "Section")
+
 
 class TestWikilinkResolution:
     def test_exact_relative_path(self, tmp_vault: Path):
