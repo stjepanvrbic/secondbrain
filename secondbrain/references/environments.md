@@ -2,6 +2,21 @@
 
 This plugin works in both Claude Code (CLI) and Claude Cowork (Desktop). They share the same vault and skills but differ in paths, plugin management, and scheduled task setup.
 
+## Immutable directories (hard rule)
+
+`inbox/` and `archive/` are **immutable via MCP**. A PreToolUse hook (`hooks/enforce-immutability.sh`) blocks any `vault_create`, `vault_update`, `vault_patch`, `vault_edit`, `vault_edit_line`, or `vault_delete` call targeting a path inside these directories.
+
+**Why:** raw input and historical data should never be mutated by the agent. This prevents accidental corruption and maintains a reliable audit trail.
+
+**The only sanctioned ways to modify inbox/ and archive/:**
+- **Adding to inbox/** — user actions (Obsidian UI, Finder, brain dumps that create new files). These happen outside MCP so they're not blocked.
+- **Moving from inbox/ to archive/inbox/** — `scripts/archive_inbox.py` (filesystem operations, bypasses MCP hook)
+- **Moving deprecated files to inbox/** — `scripts/migrate_v2_to_v3.py` (filesystem operations, bypasses MCP hook)
+
+If the agent tries to write to inbox/ or archive/ via any MCP tool, the hook returns exit code 2 and the operation is blocked with an actionable error message pointing to the correct sanctioned path.
+
+This is tested by `tests/test_enforce_immutability.py` — 28 tests covering allowed paths, blocked inbox operations, blocked archive operations, and graceful failure on malformed input.
+
 ## How to detect the environment
 
 Probe for `CronList`:

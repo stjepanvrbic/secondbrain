@@ -34,10 +34,10 @@ Read individual files only when you need full context that a query cannot provid
 | `brain/session-log.md` | Reverse-chronological session history (richer than log.md — full session details) |
 | `entities/{kebab-name}.md` | Person/company/place/tool profiles (frontmatter: type, domains, relationship) |
 | `entities/directory.md` | Quick-reference entity lookup table |
-| `inbox/*.md` | Raw input staging — moved to archive/inbox/ after processing, NEVER modified in place |
+| `inbox/*.md` | **IMMUTABLE via MCP.** Raw input staging. Agent CANNOT write/patch/delete. Moved to archive/inbox/ by scripts/archive_inbox.py after ingest processing. |
 | `{domain}/` | Domain folders the user creates as life areas grow |
 | `me/` | Self-knowledge: profile.md, energy.md, adhd-protocol.md (optional) |
-| `archive/` | Archived content (completed projects, old tasks) |
+| `archive/` | **IMMUTABLE via MCP.** Historical raw data. Agent CANNOT write/patch/delete. Only modified by sanctioned scripts (archive_inbox.py, migrate_v2_to_v3.py). |
 | `scratch/` | Ideas, unsorted notes |
 | `glossary.md` | Terms, acronyms, shorthand |
 
