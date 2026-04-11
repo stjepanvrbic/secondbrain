@@ -287,6 +287,78 @@ class TestAddVaultToConfig:
 
 
 # ---------------------------------------------------------------------------
+# add_vault_to_config(with_push=...) — T8 extension
+# ---------------------------------------------------------------------------
+#
+# Phase 2 needs a per-vault flag recording whether the user opted into
+# auto-push so the Stop hook (T9) can decide whether to push after every
+# commit. The flag lives in vaults.json and is set through add_vault_to_config
+# — we do NOT expose a separate update_vault_config function because the
+# semantics are identical (add-or-update a single entry).
+
+class TestAddVaultToConfigWithPush:
+    def test_fresh_add_defaults_with_push_false(
+        self, isolated_config: Path, tmp_path: Path
+    ):
+        vault = tmp_path / "vault1"; vault.mkdir()
+        add_vault_to_config(vault, "id-1", "Vault One")
+        data = json.loads(isolated_config.read_text())
+        assert data["vaults"][0]["with_push"] is False
+
+    def test_fresh_add_with_push_true(
+        self, isolated_config: Path, tmp_path: Path
+    ):
+        vault = tmp_path / "vault1"; vault.mkdir()
+        result = add_vault_to_config(
+            vault, "id-1", "Vault One", with_push=True
+        )
+        assert result.success is True
+        assert result.did_work is True
+        data = json.loads(isolated_config.read_text())
+        assert data["vaults"][0]["with_push"] is True
+
+    def test_update_flips_with_push_counts_as_did_work(
+        self, isolated_config: Path, tmp_path: Path
+    ):
+        vault = tmp_path / "vault1"; vault.mkdir()
+        add_vault_to_config(vault, "id-1", "Vault One", with_push=False)
+
+        # Flip with_push from False to True — this is a real change.
+        result = add_vault_to_config(
+            vault, "id-1", "Vault One", with_push=True
+        )
+        assert result.success is True
+        assert result.did_work is True
+
+        data = json.loads(isolated_config.read_text())
+        assert data["vaults"][0]["with_push"] is True
+
+    def test_readd_same_with_push_is_noop(
+        self, isolated_config: Path, tmp_path: Path
+    ):
+        vault = tmp_path / "vault1"; vault.mkdir()
+        add_vault_to_config(vault, "id-1", "Vault One", with_push=True)
+
+        result = add_vault_to_config(
+            vault, "id-1", "Vault One", with_push=True
+        )
+        assert result.success is True
+        assert result.did_work is False
+
+    def test_role_can_combine_with_with_push(
+        self, isolated_config: Path, tmp_path: Path
+    ):
+        vault = tmp_path / "vault1"; vault.mkdir()
+        add_vault_to_config(
+            vault, "id-1", "Work Vault", role="work", with_push=True
+        )
+        data = json.loads(isolated_config.read_text())
+        entry = data["vaults"][0]
+        assert entry["role"] == "work"
+        assert entry["with_push"] is True
+
+
+# ---------------------------------------------------------------------------
 # remove_vault_from_config
 # ---------------------------------------------------------------------------
 
