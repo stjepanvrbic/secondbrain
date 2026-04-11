@@ -65,6 +65,7 @@ class TestSetVersion:
         (plugin_dir / "marketplace.json").write_text(json.dumps({
             "name": "test",
             "owner": {"name": "test"},
+            "metadata": {"description": "test", "version": "1.0.0"},
             "plugins": [{"name": "test", "version": "1.0.0", "source": "./"}]
         }))
 
@@ -125,6 +126,7 @@ class TestSetVersion:
         (plugin_dir / "marketplace.json").write_text(json.dumps({
             "name": "test",
             "owner": {"name": "test"},
+            "metadata": {"description": "test", "version": "2.0.0"},
             "plugins": [{"name": "test", "version": "2.0.0", "source": "./"}]
         }))
 
@@ -163,6 +165,7 @@ class TestMain:
         (plugin_dir / "marketplace.json").write_text(json.dumps({
             "name": "test",
             "owner": {"name": "test"},
+            "metadata": {"description": "test", "version": "1.0.0"},
             "plugins": [{"name": "test", "version": "1.0.0", "source": "./"}]
         }))
 

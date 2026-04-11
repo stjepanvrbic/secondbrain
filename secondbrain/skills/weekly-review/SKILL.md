@@ -6,7 +6,7 @@ description: >
   Full audit of all life threads — goals, milestones, commitments, deadlines,
   domains, decisions, entity follow-ups. Builds next week's plan. Scheduled task only.
 metadata:
-  version: "3.2.5"
+  version: "3.3.0"
 ---
 
 # Core Rule

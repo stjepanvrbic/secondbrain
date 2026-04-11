@@ -9,9 +9,12 @@ Contributions welcome. The plugin is built around an opinionated philosophy (see
 ```bash
 git clone https://github.com/stjepanvrbic/secondbrain.git
 cd secondbrain
+python3 secondbrain/scripts/install_git_hooks.py
 ```
 
 The plugin is Markdown skill files + Python scripts in `scripts/`. There's no build step.
+
+**`install_git_hooks.py` is required after cloning.** It wires `core.hooksPath = .githooks`, which installs the tracked `.githooks/pre-push` hook. That hook refuses to let you push a broken plugin — it runs the full test suite, checks version consistency across `plugin.json` / `marketplace.json` (both `metadata.version` and `plugins[].version`), verifies all hook command scripts are resolvable and executable, verifies no orphan scripts, and refuses pushes whose version is not strictly greater than the last git tag. The hook NEVER amends commits during push — if something is wrong, you fix it and push again.
 
 ### Running tests
 

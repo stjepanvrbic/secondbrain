@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+#
+# pre-push: refuse to push unless the plugin is in a perfectly healthy state.
+#
+# This hook is TRACKED in the repo (.githooks/pre-push) and activated by running
+# `python3 secondbrain/scripts/install_git_hooks.py` which sets
+# `core.hooksPath = .githooks`. If you see this hook not running, core.hooksPath
+# is probably not set for your clone.
+#
+# What this hook refuses to allow:
+#   1. version drift        — plugin.json / marketplace.json metadata.version / plugins[].version / SKILL.md all in lockstep
+#   2. stale version        — current version must be strictly greater than the last git tag
+#   3. manifest breakage    — test_plugin_manifest.py must pass
+#   4. any failing test     — the full pytest suite must pass
+#
+# What this hook must NOT do:
+#   - NEVER `git commit --amend` during push. The old hook did that, which caused
+#     a non-fast-forward push, which caused a force-push, which wedged every
+#     shallow marketplace clone downstream. If the version wasn't bumped, REFUSE
+#     the push and tell the human to bump manually.
+#   - NEVER pass `--no-verify` in any nested git call.
+#   - NEVER skip tests under time pressure.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+PLUGIN_ROOT="$REPO_ROOT/secondbrain"
+BUMP_SCRIPT="$PLUGIN_ROOT/scripts/bump_version.py"
+TESTS_DIR="$PLUGIN_ROOT/tests"
+
+red()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
+green() { printf '\033[32m%s\033[0m\n' "$*" >&2; }
+bold()  { printf '\033[1m%s\033[0m\n' "$*" >&2; }
+
+fail() {
+    red "pre-push BLOCKED: $1"
+    if [ $# -ge 2 ]; then
+        shift
+        for line in "$@"; do
+            red "    $line"
+        done
+    fi
+    exit 1
+}
+
+bold "pre-push: full health check starting"
+
+# -------------------------------------------------------------------------
+# 0. Sanity: must have python3 and pytest
+# -------------------------------------------------------------------------
+command -v python3 >/dev/null 2>&1 || fail "python3 not on PATH"
+python3 -c "import pytest" 2>/dev/null || fail "pytest not installed" \
+    "Install with: pip install pytest pytest-mock"
+
+# -------------------------------------------------------------------------
+# 1. Version consistency across all files
+# -------------------------------------------------------------------------
+bold "pre-push: [1/4] version consistency check"
+if ! python3 "$BUMP_SCRIPT" --check; then
+    fail "version files are inconsistent" \
+        "Fix with:" \
+        "    python3 secondbrain/scripts/bump_version.py <new-version>" \
+        "    git add -u && git commit --amend --no-edit" \
+        "    git push"
+fi
+
+# -------------------------------------------------------------------------
+# 2. Version must be strictly greater than the last tag
+# -------------------------------------------------------------------------
+bold "pre-push: [2/4] version-beyond-last-tag check"
+CURRENT_VERSION=$(python3 -c 'import json,sys; print(json.load(open("'"$PLUGIN_ROOT"'/.claude-plugin/plugin.json"))["version"])')
+LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+
+if [ -n "$LAST_TAG" ]; then
+    TAG_CLEAN="${LAST_TAG#v}"
+    # Compare semver tuples numerically. If identical OR current < tag, refuse.
+    if ! python3 - "$CURRENT_VERSION" "$TAG_CLEAN" <<'PY'
+import sys
+def parse(v): return tuple(int(x) for x in v.split("."))
+cur = parse(sys.argv[1])
+tag = parse(sys.argv[2])
+sys.exit(0 if cur > tag else 1)
+PY
+    then
+        fail "plugin version $CURRENT_VERSION is not strictly greater than last tag $LAST_TAG" \
+            "Bump with:" \
+            "    python3 secondbrain/scripts/bump_version.py" \
+            "    git add -u && git commit --amend --no-edit"
+    fi
+    green "pre-push: version $CURRENT_VERSION > tag $LAST_TAG"
+else
+    green "pre-push: no tags yet, skipping tag-beyond check"
+fi
+
+# -------------------------------------------------------------------------
+# 3. Full plugin-manifest health check
+# -------------------------------------------------------------------------
+bold "pre-push: [3/4] test_plugin_manifest.py (plugin structure health)"
+if ! python3 -m pytest "$TESTS_DIR/test_plugin_manifest.py" -q --no-header; then
+    fail "plugin manifest tests failed — the plugin would ship broken" \
+        "Fix the failures above, then push again."
+fi
+
+# -------------------------------------------------------------------------
+# 4. Full test suite
+# -------------------------------------------------------------------------
+bold "pre-push: [4/4] full pytest suite"
+if ! python3 -m pytest "$TESTS_DIR" -q --no-header; then
+    fail "tests failed — refusing to push"
+fi
+
+green "pre-push: all checks passed — push allowed"
+exit 0

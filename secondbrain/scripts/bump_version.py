@@ -60,11 +60,18 @@ def get_all_versions() -> List[Tuple[str, str, Path]]:
     data = json.loads(p.read_text())
     versions.append(("plugin.json", data["version"], p))
 
-    # marketplace.json — plugin entry version
+    # marketplace.json — two version locations that must stay in lockstep
     p = VERSION_FILES["marketplace.json"]
     data = json.loads(p.read_text())
+    # 1) top-level metadata.version — catalog-level version Cowork/Code use
+    #    to detect marketplace updates. If this doesn't bump, the marketplace
+    #    is silently treated as unchanged.
+    metadata_version = data.get("metadata", {}).get("version", "")
+    if metadata_version:
+        versions.append(("marketplace.json (metadata.version)", metadata_version, p))
+    # 2) per-plugin version
     for plugin in data.get("plugins", []):
-        versions.append(("marketplace.json", plugin.get("version", ""), p))
+        versions.append(("marketplace.json (plugins[].version)", plugin.get("version", ""), p))
 
     # SKILL.md files
     for skill_path in find_skill_files():
@@ -105,9 +112,15 @@ def set_version(new_version: str) -> int:
         p.write_text(json.dumps(data, indent=2) + "\n")
         changed += 1
 
-    # marketplace.json
+    # marketplace.json — update BOTH metadata.version and plugins[].version.
+    # metadata.version is the marketplace catalog version; letting it drift
+    # from plugin.version is how we silently broke Cowork update detection.
     p = VERSION_FILES["marketplace.json"]
     data = json.loads(p.read_text())
+    metadata = data.setdefault("metadata", {})
+    if metadata.get("version") != new_version:
+        metadata["version"] = new_version
+        changed += 1
     for plugin in data.get("plugins", []):
         if plugin.get("version") != new_version:
             plugin["version"] = new_version
