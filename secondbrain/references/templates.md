@@ -354,7 +354,6 @@ last-dream-run: [TIMESTAMP]
 
 ### brain/
 - status.md
-- commitments.md
 - [... all files]
 
 ### entities/

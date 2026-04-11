@@ -1,6 +1,8 @@
 # Dream Protocol Execution Pipeline
 
 > Detailed procedures for each phase of the nightly vault maintenance run.
+> Named DQL queries referenced below are defined once in
+> `@${CLAUDE_PLUGIN_ROOT}/references/dql-patterns.md`.
 
 ---
 
@@ -35,23 +37,15 @@ Read vault state before touching anything. Understand what exists and what chang
 
 ## Phase 2 — Gather Recent Signal
 
-Use DQL queries to find what needs attention. Don't exhaustively read everything — query narrowly for what matters.
+Run the named DQL queries from `@${CLAUDE_PLUGIN_ROOT}/references/dql-patterns.md`. Don't exhaustively read everything — query narrowly for what matters.
 
 ### 2.1 Unprocessed Inbox Files
 
-```
-DQL: TABLE file.name, file.ctime FROM "inbox" WHERE processed != true SORT file.ctime ASC
-```
-
-Flag each unprocessed file for routing in Phase 3.
+Run the `unprocessed-inbox` query. Flag each result for routing in Phase 3.
 
 ### 2.2 Session Log Signal Extraction
 
-```
-READ brain/session-log.md (entries since last dream run only)
-```
-
-Scan each session entry for:
+Read `brain/session-log.md` entries since the last dream run timestamp (not the entire history) and scan each for:
 
 - **Unprocessed TODOs and action items** — tasks mentioned but not yet in brain/status.md
 - **Decisions made** — choices, conclusions, or direction changes that should be in brain/decisions.md
@@ -63,33 +57,19 @@ Collect all extracted signal into a working list for Phase 3 processing.
 
 ### 2.3 Stale Tasks
 
-```
-DQL: TASK FROM "brain/status" WHERE !done AND (date(today) - file.mtime) > dur(14 days)
-```
-
-Note: also cross-reference with brain/status.md for recent activity mentions — a task may appear stale by file modification but was discussed recently.
+Run the `stale-tasks` query. Cross-reference each result with brain/status.md for recent activity mentions — a task may appear stale by file modification but was discussed recently.
 
 ### 2.4 Deadline Proximity
 
-```
-DQL: TASK FROM "brain/status" WHERE due AND (due - date(today)) <= dur(7 days) AND !done
-```
-
-Check whether each result is already in the "Urgent This Week" section. Flag those that are not for promotion in Phase 3.
+Run the `approaching-deadlines` query. Check whether each result is already in the "Urgent This Week" section. Flag those that are not for promotion in Phase 3.
 
 ### 2.5 Archive Candidates
 
-```
-DQL: TASK FROM "brain/status" WHERE done AND (date(today) - done) > dur(7 days)
-```
+Run the `archive-candidates` query. Results move to `archive/completed-tasks-YYYY-MM.md` in Phase 3.8.
 
 ### 2.6 Broken Links & Orphans
 
-```
-FOR each file in **/*.md:
-  - Check all [[wikilinks]] resolve to existing files or sections
-  - Flag files with zero outgoing links as orphans
-```
+DQL cannot traverse link targets — use `verify_vault.py --json` per `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`. Parse the JSON for `broken-wikilink` and `orphan` entries.
 
 ### 2.7 Contradicted Content
 

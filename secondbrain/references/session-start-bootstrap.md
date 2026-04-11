@@ -1,15 +1,8 @@
 # Session-Start Bootstrap
 
-> Rules and context loaded at session start.
+> **NOT YET IN USE.** Theme 1 of the structural cleanup plan will populate this
+> file with the routing rules, state-change discipline, and ingestion directives
+> currently in `CLAUDE.md.template`, and wire the SessionStart hook to inject
+> them as a systemMessage.
 >
-> NOTE: This file is currently a stub. Theme 1 of the structural cleanup will
-> populate it with the routing rules, state-change discipline, and ingestion
-> directives currently duplicated in `CLAUDE.md.template`.
-
-## Skill routing
-
-(stub — see individual skill files for current routing rules)
-
-## State changes
-
-(stub — see `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`)
+> Until Theme 1 lands, this file is intentionally inert. No skill loads it.
