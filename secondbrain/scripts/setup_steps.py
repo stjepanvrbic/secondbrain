@@ -185,8 +185,11 @@ def setup_env_vars(
         )
 
     # Decide the target file + syntax. If the caller pinned a shell_path we
-    # trust them (tests do this); otherwise consult init_obsidian for the
-    # user's default shell config.
+    # trust them (tests do this, and the explicit-path case always stays on
+    # the POSIX branch); otherwise consult init_obsidian for the user's
+    # default shell. On Windows, detect_shell() returns "powershell" and
+    # init_obsidian handles env vars via [Environment]::SetEnvironmentVariable
+    # rather than a dotfile, so we delegate to _set_env_vars_powershell.
     if shell_path is None:
         try:
             import init_obsidian  # type: ignore[reportMissingImports]
@@ -198,6 +201,36 @@ def setup_env_vars(
                 error="init_obsidian module missing",
             )
         shell_name = init_obsidian.detect_shell()
+
+        # Windows: no dotfile — delegate to init's PowerShell helper and wrap
+        # the bool return in a StepResult. We can't cheaply compute did_work
+        # for setx/SetEnvironmentVariable (they have no "already set" check),
+        # so we conservatively report did_work=True on a real write and
+        # did_work=False on dry_run.
+        if shell_name == "powershell":
+            # _set_env_vars_powershell signature: (port, api_key, dry_run=False)
+            # Guard against port=None: the powershell helper needs a concrete
+            # port, so if the caller didn't supply one we skip the call.
+            if port is None:
+                return StepResult(
+                    success=True,
+                    message="setup_env_vars: nothing to write (port is None on powershell)",
+                    did_work=False,
+                )
+            ok = init_obsidian._set_env_vars_powershell(port, api_key, dry_run)
+            if not ok:
+                return StepResult(
+                    success=False,
+                    message="setup_env_vars: powershell helper failed",
+                    did_work=False,
+                    error="init_obsidian._set_env_vars_powershell returned False",
+                )
+            return StepResult(
+                success=True,
+                message="setup_env_vars: powershell environment variables set",
+                did_work=not dry_run,
+            )
+
         shell_path = init_obsidian.SHELL_CONFIGS.get(shell_name)
         if shell_path is None:
             return StepResult(
@@ -315,7 +348,7 @@ def write_vault_id(vault_path: Path) -> StepResult:
     if not isinstance(data, dict):
         return StepResult(
             success=False,
-            message=f"write_vault_id: marker is not a JSON object",
+            message="write_vault_id: marker is not a JSON object",
             did_work=False,
             error="expected JSON object at top level",
         )
@@ -424,7 +457,7 @@ def add_vault_to_config(
     except (OSError, json.JSONDecodeError) as exc:
         return StepResult(
             success=False,
-            message=f"add_vault_to_config: config unreadable",
+            message="add_vault_to_config: config unreadable",
             did_work=False,
             error=str(exc),
         )
@@ -480,7 +513,7 @@ def add_vault_to_config(
     except OSError as exc:
         return StepResult(
             success=False,
-            message=f"add_vault_to_config: write failed",
+            message="add_vault_to_config: write failed",
             did_work=False,
             error=str(exc),
         )

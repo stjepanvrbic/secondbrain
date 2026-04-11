@@ -480,6 +480,63 @@ class TestSetupEnvVars:
         assert "OBSIDIAN_API_KEY" in content
         assert "test-key" in content
 
+    def test_windows_powershell_branch(self, monkeypatch: pytest.MonkeyPatch):
+        """On Windows, setup_env_vars must delegate to init_obsidian._set_env_vars_powershell
+        rather than failing with a 'no config mapping for shell powershell' error.
+
+        Pre-fix regression: setup_env_vars only knew about POSIX shell configs
+        (zsh/bash/fish via SHELL_CONFIGS), so when detect_shell() returned
+        'powershell' on Windows the lookup in SHELL_CONFIGS returned None and
+        the function reported success=False.
+        """
+        import init_obsidian  # type: ignore[reportMissingImports]
+
+        monkeypatch.setattr(init_obsidian, "detect_shell", lambda: "powershell")
+
+        calls: list[tuple] = []
+
+        def fake_powershell(port: int, api_key, dry_run: bool = False) -> bool:
+            calls.append((port, api_key, dry_run))
+            return True
+
+        monkeypatch.setattr(init_obsidian, "_set_env_vars_powershell", fake_powershell)
+
+        result = setup_env_vars(api_key="test-key", port=27124, dry_run=True)
+
+        assert result.success is True, f"expected success but got: {result}"
+        assert result.error is None
+        # Verify the call path went through the powershell branch with correct args.
+        assert calls == [(27124, "test-key", True)]
+
+    def test_explicit_shell_path_stays_on_posix_branch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """When shell_path is passed explicitly (the test convention), setup_env_vars
+        must honor it and use the POSIX path even if detect_shell would say powershell.
+        This guards against the fix accidentally hijacking the explicit-path case.
+        """
+        import init_obsidian  # type: ignore[reportMissingImports]
+
+        monkeypatch.setattr(init_obsidian, "detect_shell", lambda: "powershell")
+
+        called = []
+
+        def should_not_be_called(*args, **kwargs):
+            called.append((args, kwargs))
+            return True
+
+        monkeypatch.setattr(init_obsidian, "_set_env_vars_powershell", should_not_be_called)
+
+        shell_config = tmp_path / ".zshrc"
+        shell_config.write_text("")
+        result = setup_env_vars("test-key", 27124, shell_path=shell_config)
+
+        assert result.success is True
+        assert called == []  # powershell branch NOT taken
+        content = shell_config.read_text()
+        assert "OBSIDIAN_API_KEY" in content
+        assert "OBSIDIAN_MCP_PORT" in content
+
 
 # ---------------------------------------------------------------------------
 # Import hygiene — module must be importable without side effects
