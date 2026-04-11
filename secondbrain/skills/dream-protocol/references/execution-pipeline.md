@@ -73,7 +73,7 @@ DQL cannot traverse link targets — use `verify_vault.py --json` per `@${CLAUDE
 
 ### 2.7 Entities Flagged for Verification
 
-Run the `entities-to-verify` query from `@${CLAUDE_PLUGIN_ROOT}/references/dql-patterns.md`. Ingest leaves `[verify:: true]` inline whenever it had to guess an entity link. Collect each hit (source file, line, surrounding context) for Phase 3.5a resolution.
+Run the `entities-to-verify` query from `@${CLAUDE_PLUGIN_ROOT}/references/dql-patterns.md`. Ingest leaves `[verify:: true]` inline whenever it had to guess an entity link. The query uses `FLATTEN file.lists AS L` so each result row is a single flagged bullet, not a whole file — you get `file.link` (source file) plus `L.text` (the bullet's literal text) for each hit. Collect the per-bullet rows for Phase 3.5a resolution.
 
 ### 2.8 Contradicted Content
 
@@ -165,27 +165,35 @@ ENDFOR
 
 ### 3.5a Verify-Entity Resolution
 
-Ingest leaves `[verify:: true]` inline next to wikilinks it had to guess. Process each hit from Phase 2.7:
+Ingest leaves `[verify:: true]` inline next to wikilinks it had to guess. Each Phase 2.7 query row is a single flagged **bullet** (from `FLATTEN file.lists AS L`), not a whole file — `file.link` is the source file and `L.text` is the bullet's literal text. Process each row:
 
 ```
-FOR each [verify:: true] hit:
-  1. Read the wikilink target from the same line (e.g., [[entities/jane-smith|Jane]])
-  2. Fuzzy-match the display text against existing entities/ files
-     (same >80% string-similarity mechanism as Phase 3.5)
-  3. IF a clear canonical entity exists:
-     a. Rewrite the line to point at the canonical wikilink
-     b. Remove the `[verify:: true]` marker from that line
+FOR each [verify:: true] bullet row from Phase 2.7:
+  1. Parse the wikilink out of L.text (e.g., [[entities/jane-smith|Jane]]).
+  2. Extract the target stem from the wikilink (e.g., `jane-smith` from
+     `[[entities/jane-smith|Jane]]`) — this is what you fuzzy-match against
+     filenames in entities/.
+  3. Fuzzy-match against existing entities/ files:
+     A clear canonical entity exists when a SINGLE candidate matches with
+     >80% similarity AND the gap to the next-best candidate is >20 percentage
+     points. Otherwise, treat as deferred. (Same mechanism as Phase 3.5,
+     section 3.5's wikilink repair.)
+  4. IF a clear canonical entity exists:
+     a. Rewrite the bullet in the source file to point at the canonical wikilink
+     b. Remove the `[verify:: true]` marker from that bullet
      c. Append to log.md:
         ## [YYYY-MM-DD HH:MM] dream-protocol | verify-resolved | <entity>
-        Linked <source-file>#<line> → [[entities/canonical]]
-  4. IF no clear match:
-     a. Append a block to scratch/to-verify.md:
+        Linked <source-file> → [[entities/canonical]]
+  5. IF no clear match:
+     a. If scratch/to-verify.md does not exist, create it (dream-protocol
+        creates it on first verify-deferred entry).
+     b. Append a block to scratch/to-verify.md:
         ## <entity-guess> — [YYYY-MM-DD HH:MM]
-        - Source: [[<source-file>#<section or line>]]
-        - Context: "<surrounding sentence>"
+        - Source: [[<source-file>]]
+        - Context: "<L.text>"
         - Current wikilink: [[entities/best-guess|Best Guess]]
-     b. Leave the `[verify:: true]` inline flag in place so the next dream run re-checks it
-     c. Append to log.md:
+     c. Leave the `[verify:: true]` inline flag in place so the next dream run re-checks it
+     d. Append to log.md:
         ## [YYYY-MM-DD HH:MM] dream-protocol | verify-deferred | <entity>
         Context moved to [[scratch/to-verify]]
 ENDFOR
@@ -285,36 +293,67 @@ ENDFOR
 
 ### 3.12 Contradiction Soft-Archive
 
-Never hard-delete contradicted content. Move it to `archive/contradictions/YYYY-MM/` with a sidecar so the resolution is recoverable and auditable.
+Never hard-delete contradicted content. Each contradiction goes into
+`archive/contradictions/YYYY-MM/` via `archive_contradiction.py`, which
+writes both the superseded-content file and a sidecar and is the only
+sanctioned way to write under `archive/*` (MCP `vault_create` is blocked
+there by the immutability hook).
+
+Iterate **per contradiction**, not per file — one file can have multiple
+independent contradictions in a single dream run, and each gets its own
+archive + sidecar pair. Pattern matches Phase 3.8's per-item iteration.
 
 ```
 FOR each contradicted item flagged in Phase 2.8:
-  1. Slugify a short subject for the archive filename (e.g., `acme-renewal-date`)
-  2. Create the archive copy via MCP vault_create:
-        archive/contradictions/YYYY-MM/<slug>.md
-     Body: the superseded content verbatim (either the whole file, or just the
-     contradicted section, whichever is the smallest coherent unit).
-  3. Create a sidecar via MCP vault_create:
-        archive/contradictions/YYYY-MM/<slug>.sidecar.md
-     Containing the FOUR required pieces of information:
+  1. Derive a short subject for the archive filename (e.g., "acme-renewal-date").
+     The script slugs it — no need to pre-slugify.
+
+  2. Write the new content to a temp file the script can read:
+        /tmp/sb-contradiction-<N>.md
+
+  3. Determine scope — "smallest coherent unit":
+     - If the whole file is obsolete, pass --original-file only.
+     - If only a section is obsolete, pass --section-anchor "<Heading Text>"
+       and the script extracts just that section (case-insensitive match,
+       stopping at the next heading of the same or higher level).
+
+  4. Invoke the script:
+        python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_contradiction.py \
+          ${VAULT_PATH} \
+          --original-file <path-to-original> \
+          [--section-anchor "<Heading>"] \
+          --new-content-file /tmp/sb-contradiction-<N>.md \
+          --source-description "<where the new info came from, [[wikilink]] when possible>" \
+          --reasoning "<why the new wins>" \
+          --subject "<short subject>"
+     The script handles directory creation, slug collisions (appends -1, -2,
+     ...), and writes the sidecar with all FOUR required pieces of info:
         (1) Superseded content — verbatim
         (2) New content — the statement that now supersedes it
         (3) Source of new content — session-log entry, inbox file, entity
             page, email, etc. as a [[wikilink]] when possible
         (4) Resolution reasoning — why the new content wins (date, authority,
             direct observation, etc.)
-  4. Update the live vault file with the new content. Add a one-line backlink:
-        > Superseded content archived at
-        > [[archive/contradictions/YYYY-MM/<slug>]]
-  5. Append to log.md:
+     It prints a single JSON line to stdout with archive_path / sidecar_path /
+     slug. Capture the paths.
+
+  5. Edit the live vault file in place to the new state. Add a blockquote
+     backlink pointing at the archived copy:
+        > Archived at [[archive/contradictions/YYYY-MM/<slug>]]
+     The script does NOT touch the original file — editing is the caller's job.
+
+  6. Append to log.md:
         ## [YYYY-MM-DD HH:MM] dream-protocol | contradiction-resolved | <subject>
         <one-line body: live file + archive path>
-  6. Do NOT call vault_delete on the original content — the archive copy IS
-     the preservation. Edit the live file in place to the new state.
+
+  7. Clean up the temp file.
 ENDFOR
 ```
 
-Recoverability is the point: any resolution can be inspected and reversed by reading the archive + sidecar pair.
+The script never calls `vault_delete` and never edits the original — the
+archive copy IS the preservation, and the live file is edited in place.
+Recoverability is the point: any resolution can be inspected and reversed
+by reading the archive + sidecar pair.
 
 ---
 

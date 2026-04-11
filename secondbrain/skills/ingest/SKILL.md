@@ -114,7 +114,7 @@ Got it — 1 task (unclear on deadline, guessed this week), 1 idea.
 - Entity doesn't exist -> create stub via scripts/create_entity_stubs.py
 - DQL query returns empty -> fall back to vault_search, then vault_list
 - Never mark operation complete if validation failed
-- **Ambiguous entity names**: Create or link to the best-guess entity AND append `[verify:: true]` inline on the same line as the wikilink (see Rule 2 in `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`). Dream-protocol queries these nightly and either (a) auto-resolves via fuzzy match once a canonical entity exists, or (b) promotes the context to `scratch/to-verify.md` for human review. NEVER leave a prose-only "verify entity link" comment — it must be a structured, DQL-queryable inline field.
+- **Ambiguous entity names**: Create or link to the best-guess entity AND append `[verify:: true]` inline on the same line as the wikilink (see Rule 2a in `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`). Dream-protocol queries these nightly and either (a) auto-resolves via fuzzy match once a canonical entity exists, or (b) promotes the context to `scratch/to-verify.md` for human review. NEVER leave a prose-only "verify entity link" comment — it must be a structured, DQL-queryable inline field.
 - **Missing deadline**: Ingest without [due::], note in status.md
 - **Unknown domain**: Create note in scratch/ideas.md flagged for review
 - **Broken entity links**: Add them anyway, dream protocol fixes nightly

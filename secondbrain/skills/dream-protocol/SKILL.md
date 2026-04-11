@@ -21,7 +21,7 @@ Nightly reflective pass over the vault. Synthesize recent activity into durable,
 3. For content templates, read `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`.
 4. For shared write rules (wikilinks, metadata, atomic sections, entity stubs), read `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`.
 5. For the named DQL queries used in Phase 2, read `@${CLAUDE_PLUGIN_ROOT}/references/dql-patterns.md`.
-6. For script commands (`verify_vault.py`, `rebuild_manifest.py`, `archive_inbox.py`), read `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`.
+6. For script commands (`verify_vault.py`, `rebuild_manifest.py`, `archive_inbox.py`, `archive_contradiction.py`), read `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`.
 
 # Phase 1 — Orient
 
@@ -68,9 +68,9 @@ Process everything found in Phase 2. Full details in `references/execution-pipel
 - Check project completion by domain
 - Convert relative dates to absolute dates
 - Resolve contradicted content via **soft-archive** (never delete):
-  - Move the superseded file (or the extracted superseded section as a new file) to `archive/contradictions/YYYY-MM/<slug>.md` via MCP `vault_create` + `vault_delete`.
-  - Write a sidecar `<slug>.sidecar.md` next to it containing: (1) the superseded content verbatim, (2) the new content that contradicts it, (3) where the new content came from (session-log entry, inbox file, entity page, etc.), (4) the reasoning for choosing the new over the old.
-  - Update the live vault file with the new content, linking back to the archived copy so the original is recoverable.
+  - Move the superseded content to `archive/contradictions/YYYY-MM/<slug>.md` via `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_contradiction.py` (see `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`). The script writes both the archive file and a sidecar `<slug>.sidecar.md` containing: (1) the superseded content verbatim, (2) the new content that contradicts it, (3) where the new content came from (session-log entry, inbox file, entity page, etc.), (4) the reasoning for choosing the new over the old.
+  - MCP `vault_create` is hook-blocked for `archive/*` — always go through the script. The script handles directory creation, slug collision suffixes, and section extraction.
+  - Then edit the live vault file in place to the new state, adding a one-line blockquote backlink to the archived copy (`> Archived at [[archive/contradictions/YYYY-MM/<slug>]]`). Never call `vault_delete` on the original — the script doesn't touch it, and neither should you.
   - Append to `log.md`: `## [YYYY-MM-DD HH:MM] dream-protocol | contradiction-resolved | <subject>` with a one-line body pointing at both the live file and the archived copy.
   - No hard deletes. The archived content remains recoverable.
 

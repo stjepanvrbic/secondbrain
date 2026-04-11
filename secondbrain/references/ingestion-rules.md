@@ -54,6 +54,10 @@ Why structured instead of a prose comment:
 
 Field order when combined with task metadata: append `[verify:: true]` at the END of the line, AFTER `[est::]`. Do not insert it mid-sequence.
 
+### Rule 2b — Blockquote backlinks for superseded content
+
+When dream-protocol soft-archives contradicted content (Phase 3.12), the live file keeps a blockquote backlink pointing at the archive copy: `> Archived at [[archive/contradictions/YYYY-MM/<slug>]]`. The blockquote form makes it visually distinct from live content and searchable as a DQL pattern. Never rewrite or strip these backlinks — they are the recoverability path for the archived resolution.
+
 ## Rule 3 — Atomic Sections
 
 Structure every write as an atomic section with a clear, searchable heading, 1-3 bullets, and wikilinks throughout. One concept per section. No sprawling prose dumps.

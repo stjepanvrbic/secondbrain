@@ -69,16 +69,22 @@ Used by: deadline-check, weekly-review, morning-brief.
 ## `entities-to-verify` — wikilinks ingest flagged as uncertain
 
 ```
-TABLE file.link AS "Source", verify
+TABLE WITHOUT ID file.link AS "Source", L.text AS "Context"
 FROM ""
-WHERE verify = true
+FLATTEN file.lists AS L
+WHERE L.verify = true
 SORT file.mtime DESC
 ```
 
-Finds every line tagged `[verify:: true]` — ingest uses this marker whenever
-it had to guess which entity a wikilink points at (see Rule 2a in
-`@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`). Used by:
-dream-protocol (Phase 2 — gathered, Phase 3 — fuzzy-resolved or promoted to
+Finds every list item tagged `[verify:: true]` — ingest uses this marker
+whenever it had to guess which entity a wikilink points at (see Rule 2a in
+`@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`). `FLATTEN
+file.lists AS L` expands each page's bullets into their own rows so the
+per-bullet inline field resolves — a page-level `WHERE verify = true`
+would only match frontmatter or root-level fields and miss the marker
+entirely. Each row returns the source file (`file.link`) and the literal
+text of the flagged bullet (`L.text`). Used by: dream-protocol (Phase 2 —
+gathered, Phase 3.5a — fuzzy-resolved or promoted to
 `scratch/to-verify.md`). The flag stays in place until dream-protocol can
 resolve it against a canonical entity, so the query is self-healing.
 

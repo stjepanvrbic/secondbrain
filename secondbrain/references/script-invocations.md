@@ -71,6 +71,74 @@ Dry run:
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py ${VAULT_PATH} --dry-run
 ```
 
+## `archive_contradiction.py` — soft-archive contradicted content
+
+Dream-protocol Phase 3.12 uses this to move superseded vault content into
+`archive/contradictions/YYYY-MM/` with a sidecar. MCP `vault_create` is
+blocked for `archive/*` by the immutability hook, so this script is the
+only sanctioned way to write contradiction archives.
+
+The script NEVER modifies the original live file. The caller is responsible
+for editing the live file in place after the archive + sidecar exist.
+
+### Whole-file supersession
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_contradiction.py ${VAULT_PATH} \
+  --original-file ${VAULT_PATH}/brain/stale-note.md \
+  --new-content-file /tmp/new-content.md \
+  --source-description "2026-04-10 session log, from [[entities/alice]]" \
+  --reasoning "Direct from the account owner supersedes the stale cached date" \
+  --subject "acme-renewal-date"
+```
+
+### Section-anchor mode (smallest coherent unit)
+
+When only part of a file is contradicted, pass the heading text of the
+section to extract:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_contradiction.py ${VAULT_PATH} \
+  --original-file ${VAULT_PATH}/brain/status.md \
+  --section-anchor "Acme Renewal" \
+  --new-content-file /tmp/new-content.md \
+  --source-description "..." --reasoning "..." --subject "acme-renewal"
+```
+
+The script extracts the heading plus everything up to the next heading of
+the same or higher level. Heading match is case-insensitive.
+
+### Dry run
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_contradiction.py ${VAULT_PATH} \
+  --original-file ${VAULT_PATH}/brain/status.md \
+  --new-content-file /tmp/new-content.md \
+  --source-description "..." --reasoning "..." --subject "..." \
+  --dry-run
+```
+
+Validates inputs, computes the target paths and final slug, prints what
+would be created, and writes nothing.
+
+### Output
+
+On success the script prints a single JSON line to stdout with the final
+archive and sidecar paths (relative to the vault) and the resolved slug:
+
+```json
+{"archive_path": "archive/contradictions/2026-04/acme-renewal-date.md", "sidecar_path": "archive/contradictions/2026-04/acme-renewal-date.sidecar.md", "slug": "acme-renewal-date"}
+```
+
+Use this to embed a blockquote backlink in the live file:
+
+```markdown
+> Archived at [[archive/contradictions/2026-04/acme-renewal-date]]
+```
+
+The script handles slug collisions automatically by appending `-1`, `-2`,
+... suffixes, and creates `archive/contradictions/YYYY-MM/` on demand.
+
 ## `create_entity_stubs.py` — create missing entity files
 
 ### By name
