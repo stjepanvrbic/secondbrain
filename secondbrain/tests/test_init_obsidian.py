@@ -2,17 +2,16 @@
 
 import json
 import os
-import platform
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from init_obsidian import (
+from init_obsidian import (  # type: ignore[reportMissingImports]
     detect_platform, is_wsl, find_obsidian, find_existing_vaults,
     install_plugin, enable_plugins, configure_mcp_plugin, detect_shell,
-    set_env_vars, scaffold_vault, import_notes, default_vault_path, main,
+    set_env_vars, scaffold_vault, import_notes, main,
     ensure_obsidian_running,
     REQUIRED_DIRS, CRITICAL_FILES, PLUGINS,
 )
@@ -134,7 +133,7 @@ class TestEnsureObsidianRunningTimeout:
             return fake_clock["now"]
 
         def fake_run(cmd, *args, **kwargs):
-            # pgrep never finds Obsidian; `open -a` launch "succeeds"
+            del args, kwargs  # subprocess.run passes extra args/flags; we only inspect cmd
             mock = MagicMock()
             mock.returncode = 0 if cmd[:2] == ["open", "-a"] else 1
             mock.stdout = ""
@@ -234,7 +233,7 @@ class TestConfigureMcpPlugin:
         assert config.exists()
 
     def test_dry_run(self, tmp_vault: Path):
-        port, key = configure_mcp_plugin(tmp_vault, dry_run=True)
+        port, _ = configure_mcp_plugin(tmp_vault, dry_run=True)
         assert port == 27124
         config = tmp_vault / ".obsidian" / "plugins" / "connect-mcp" / "data.json"
         assert not config.exists()
