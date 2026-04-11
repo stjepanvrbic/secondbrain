@@ -572,12 +572,14 @@ PROFILE_TEMPLATE_PATH = (
 
 # Placeholders the profile template uses. scaffold_vault writes the template
 # unchanged (placeholders intact) — the init skill fills them in during the
-# profile-seeding step after talking to the user.
+# profile-seeding step after talking to the user. Stored as bare names (no
+# `{{...}}` wrapping) so the verification helper can compare them directly
+# against the set parsed out of the template text.
 PROFILE_PLACEHOLDERS = (
-    "{{USER_NAME}}", "{{USER_ROLE}}", "{{USER_NEXT_ROLE}}",
-    "{{USER_PARTNER}}", "{{USER_PREFERENCES}}",
-    "{{WAKEUP_TIME}}", "{{MORNING_WINDOW}}",
-    "{{AFTERNOON_WINDOW}}", "{{EVENING_WINDOW}}",
+    "USER_NAME", "USER_ROLE", "USER_NEXT_ROLE",
+    "USER_PARTNER", "USER_PREFERENCES",
+    "WAKEUP_TIME", "MORNING_WINDOW",
+    "AFTERNOON_WINDOW", "EVENING_WINDOW",
 )
 
 CRITICAL_FILES = {
@@ -592,6 +594,31 @@ CRITICAL_FILES = {
 }
 
 
+def _verify_profile_template_placeholders(template_text: str) -> None:
+    """Sanity-check the profile template has the expected placeholder set.
+
+    Logs a warning to stderr if the template drifts from PROFILE_PLACEHOLDERS
+    but does not fail — scaffolding must proceed even if the template is
+    slightly off. This turns the PROFILE_PLACEHOLDERS constant into an
+    enforced contract: edits to the template that drop or add placeholders
+    surface immediately instead of silently going wrong during init.
+    """
+    found = set(re.findall(r"\{\{([A-Z_]+)\}\}", template_text))
+    expected = set(PROFILE_PLACEHOLDERS)
+    missing = expected - found
+    unexpected = found - expected
+    if missing:
+        print(
+            f"Warning: profile template missing placeholders: {sorted(missing)}",
+            file=sys.stderr,
+        )
+    if unexpected:
+        print(
+            f"Warning: profile template has unexpected placeholders: {sorted(unexpected)}",
+            file=sys.stderr,
+        )
+
+
 def _load_profile_template() -> str:
     """Read the profile.md template shipped with the plugin.
 
@@ -601,13 +628,15 @@ def _load_profile_template() -> str:
     runs read the full template.
     """
     try:
-        return PROFILE_TEMPLATE_PATH.read_text(encoding="utf-8")
+        text = PROFILE_TEMPLATE_PATH.read_text(encoding="utf-8")
     except OSError:
         return (
             "# Profile\n\n"
             "_Run /secondbrain:init to seed your profile "
             "(the template file is missing from the plugin install)._\n"
         )
+    _verify_profile_template_placeholders(text)
+    return text
 
 
 def scaffold_vault(vault_path: Path, dry_run: bool = False) -> int:

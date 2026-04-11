@@ -3,7 +3,7 @@ name: doctor
 description: >
   This skill should be used when the user asks "what's wrong with my
   secondbrain", "is everything working", "diagnose my setup", "fix my
-  vault", or "secondbrain not working". Runs a 12-point diagnostic and
+  vault", or "secondbrain not working". Runs a 13-point diagnostic and
   reports pass/fail with specific fix commands for each issue. Read-only —
   never modifies anything.
 metadata:
@@ -21,7 +21,7 @@ Run a comprehensive read-only diagnostic of the secondbrain plugin install. For 
 
 # Execution
 
-Run all 12 checks in order. Don't stop on the first failure — collect all results and report at the end.
+Run all 13 checks in order. Don't stop on the first failure — collect all results and report at the end.
 
 ## Check 1: Plugin install location
 

@@ -594,7 +594,17 @@ A few quick questions so I'm not starting cold:
 
 After answers:
 - Open `me/profile.md` (scaffolded from `${CLAUDE_PLUGIN_ROOT}/skills/init/templates/profile.md` during Step 4)
-- Replace placeholders in `me/profile.md` with the user's answers: `{{USER_NAME}}`, `{{USER_ROLE}}`, `{{USER_PREFERENCES}}`. Leave the rhythm placeholders (`{{WAKEUP_TIME}}`, `{{MORNING_WINDOW}}`, etc.) with reasonable defaults (e.g., `8:00am`, `8am-12pm`, `12pm-6pm`, `6pm-10pm`) unless the user volunteers different values.
+- Replace ALL 9 `{{...}}` placeholders in `me/profile.md`. After this step, the file must contain zero literal `{{...}}` strings. Handle each placeholder as follows:
+  - `{{USER_NAME}}` — replace with the user's answer from Q1
+  - `{{USER_ROLE}}` — replace with the user's answer from Q2
+  - `{{USER_PREFERENCES}}` — replace with the user's answer from Q3
+  - `{{USER_NEXT_ROLE}}` — replace with `_not set yet — add later when relevant_` (the agent will fill this in naturally from future conversation; don't ask now)
+  - `{{USER_PARTNER}}` — replace with `_not set yet — add later when relevant_` (same — fill in later if/when the user mentions a partner)
+  - `{{WAKEUP_TIME}}` — replace with `8:00am` (reasonable default)
+  - `{{MORNING_WINDOW}}` — replace with `8am-12pm` (reasonable default)
+  - `{{AFTERNOON_WINDOW}}` — replace with `12pm-6pm` (reasonable default)
+  - `{{EVENING_WINDOW}}` — replace with `6pm-10pm` (reasonable default)
+- The rhythm defaults are a starting point, not a question — replace the literal placeholder strings with the defaults above; don't leave any `{{...}}` tokens behind. If the user volunteers different rhythm values in conversation, use those instead.
 - Print: `Profile seeded. It'll build up naturally from here — you can always edit me/profile.md directly.`
 
 ---
