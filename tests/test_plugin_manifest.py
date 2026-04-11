@@ -43,6 +43,7 @@ HOOKS_DIR = PLUGIN_ROOT / "hooks"
 CLI_ENTRYPOINT_ALLOWLIST = {
     "bump_version.py",         # dev-only: used by pre-push hook and CI
     "install_git_hooks.py",    # dev-only: documented in repo-root CONTRIBUTING.md
+    "setup_steps.py",          # library-only: imported by init + doctor (wired up in T3/T6)
 }
 
 # Dirs the installer SHIPS to users. Nothing under here may contain dev cruft.
