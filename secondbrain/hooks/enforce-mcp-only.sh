@@ -45,6 +45,7 @@ python3 <<'PY'
 import json
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -114,6 +115,39 @@ def _registered_vault_paths():
         except Exception:
             continue
     return out
+
+
+def _path_variants(path):
+    """Return the set of string forms a registered vault path might take in
+    a Bash command or file_path argument.
+
+    Handles the macOS symlink quirk where /tmp ↔ /private/tmp and
+    /var/folders ↔ /private/var/folders refer to the same inode. The hook
+    must match the command's literal form, which may be either side of that
+    symlink depending on how the agent wrote it.
+    """
+    if path is None:
+        return set()
+    variants = set()
+    s = str(path)
+    variants.add(s)
+    # Add the resolved form.
+    try:
+        r = str(Path(s).resolve())
+        variants.add(r)
+    except Exception:
+        r = s
+    # macOS: /private/tmp/x ↔ /tmp/x, /private/var/folders/x ↔ /var/folders/x.
+    # If we have a /private-prefixed form, add the stripped form as a variant.
+    # If we have a non-/private form, add the /private-prefixed form.
+    for v in (s, r):
+        if v.startswith("/private/"):
+            variants.add(v[len("/private"):])
+        elif v.startswith("/tmp/") or v == "/tmp":
+            variants.add("/private" + v)
+        elif v.startswith("/var/folders/") or v == "/var/folders":
+            variants.add("/private" + v)
+    return variants
 
 
 def _resolve(path_str):
@@ -205,11 +239,85 @@ def _handle_edit(tool_input):
     _allow()
 
 
-def _command_invokes_sanctioned_script(command):
-    for script in SANCTIONED_SCRIPTS:
-        if script in command:
-            return True
+def _split_command_segments(command):
+    """Split a Bash command into segments delimited by shell separators.
+
+    Returns the list of individual command strings. Uses a regex split so we
+    don't need a full shell parser — good enough for common agent commands.
+    """
+    # Split on &&, ||, ;, |, & — but not |&, ||, && (handled by order).
+    # Regex matches: && | || | ; | & | | (pipe) (but not parts of && or ||).
+    parts = re.split(r"\s*(?:\|\||&&|;|\||&)\s*", command)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _segment_is_sanctioned_call(segment):
+    """Return True iff this single command segment is an invocation of a
+    sanctioned Python script.
+
+    Accepts forms like:
+        python3 scripts/verify_vault.py ARGS...
+        python scripts/archive_inbox.py ARGS...
+        python3 ${CLAUDE_PLUGIN_ROOT}/scripts/update_hot_memory.py ARGS...
+        ./scripts/foo.py ARGS...  (if foo.py is sanctioned)
+
+    The script must be a *token* (a shell argument) — not a substring of a
+    redirection target or an echo argument.
+    """
+    try:
+        tokens = shlex.split(segment, posix=True)
+    except ValueError:
+        # Malformed quoting — be conservative, don't treat as sanctioned.
+        return False
+    if not tokens:
+        return False
+
+    # Strip leading env assignments (`FOO=bar python3 ...`).
+    idx = 0
+    while idx < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tokens[idx]):
+        idx += 1
+    if idx >= len(tokens):
+        return False
+
+    head = tokens[idx]
+    head_base = Path(head).name
+
+    # `python[3] <script_path>` — the next positional arg (skipping `-` flags
+    # that aren't `-c/-m`) must be a sanctioned script.
+    if head_base in ("python", "python3"):
+        # Walk past python options until we hit a positional arg.
+        j = idx + 1
+        while j < len(tokens) and tokens[j].startswith("-"):
+            # `-c` / `-m` consume the next token as inline code/module —
+            # neither is a sanctioned script invocation.
+            if tokens[j] in ("-c", "-m"):
+                return False
+            j += 1
+        if j >= len(tokens):
+            return False
+        script_token = tokens[j]
+        # The script token may be ${VAR}/path/foo.py or /abs/foo.py or foo.py.
+        script_base = Path(script_token).name
+        return script_base in SANCTIONED_SCRIPTS
+
+    # Direct invocation of a sanctioned script (rare but possible).
+    if head_base in SANCTIONED_SCRIPTS:
+        return True
+
     return False
+
+
+def _command_invokes_sanctioned_script(command):
+    """Return True iff every segment of `command` is a sanctioned script call.
+
+    A sanctioned call is only a free pass when it's the *entire* command. If
+    any segment is a non-sanctioned action (`rm`, `echo > ...`, etc.) the
+    whole command must go through the normal write-verb check.
+    """
+    segments = _split_command_segments(command)
+    if not segments:
+        return False
+    return all(_segment_is_sanctioned_call(seg) for seg in segments)
 
 
 def _starts_with_read_verb(command):
@@ -227,7 +335,12 @@ def _starts_with_read_verb(command):
     return False
 
 
-def _command_has_write_verb(command):
+def _command_has_non_redirect_write_verb(command):
+    """Return True iff the command contains a write verb OTHER than output
+    redirection (`>` / `>>`). Used to distinguish `rm /vault/x` (always a
+    vault-touching write) from `cat /vault/x > /tmp/out` (a read that happens
+    to produce output elsewhere).
+    """
     tokens = command.split()
     if tokens:
         head = Path(tokens[0]).name
@@ -235,25 +348,105 @@ def _command_has_write_verb(command):
             return True
     if re.search(r"(^|[;&|`$(])\s*(mv|rm|cp|touch|tee|dd|install)\b", command):
         return True
-    if re.search(r"\bsed\s+-i\b", command):
-        return True
-    # Output redirection. Ignore `&>` and `2>` (stderr redirection).
-    if re.search(r"(?<![&0-9])>\s*(?!&)", command):
+    # `sed -i` in all its spellings — see _command_has_write_verb.
+    if re.search(r"\bsed\s+(?:-[^i\s]*\s+)*-i", command):
         return True
     return False
 
 
+def _command_has_redirect_write(command):
+    """Return True iff the command contains a `>` or `>>` output redirection.
+    Ignores `&>` and numeric-FD redirections like `2>`.
+    """
+    return bool(re.search(r"(?<![&0-9])>\s*(?!&)", command))
+
+
+def _command_has_write_verb(command):
+    return _command_has_non_redirect_write_verb(command) or _command_has_redirect_write(command)
+
+
 def _command_references_path(command, path):
-    candidates = {str(path)}
-    try:
-        candidates.add(str(path.resolve()))
-    except Exception:
-        pass
+    candidates = set(_path_variants(path))
     home = os.environ.get("HOME")
-    if home and str(path).startswith(home):
-        candidates.add("~" + str(path)[len(home):])
+    if home:
+        for c in list(candidates):
+            if c.startswith(home):
+                candidates.add("~" + c[len(home):])
     for c in candidates:
         if c in command:
+            return True
+    return False
+
+
+def _redirection_targets(command):
+    """Return the set of paths that appear as `>` or `>>` redirection targets
+    in `command`. Used to distinguish "read from vault, write elsewhere" from
+    "write into vault".
+
+    This is a heuristic parser — it handles the common agent cases
+    (`cat a > b`, `echo x >> b`, `cmd > b 2>&1`) and skips stderr redirections
+    like `2>` and `&>`.
+    """
+    targets = []
+    # Match `>` or `>>` followed by whitespace and a token. Exclude `&>` and
+    # numeric FD prefixes like `2>`. The target token runs until whitespace or
+    # another shell metachar.
+    for m in re.finditer(r"(?<![&0-9])>>?\s*([^\s|;&<>]+)", command):
+        token = m.group(1)
+        # Strip surrounding quotes.
+        if (token.startswith('"') and token.endswith('"')) or (
+            token.startswith("'") and token.endswith("'")
+        ):
+            token = token[1:-1]
+        targets.append(token)
+    return targets
+
+
+def _path_is_under_any_vault(path_str, vaults):
+    """Return True iff `path_str` (treated literally and after resolving)
+    points inside any of the registered vault paths. Uses the same
+    variant-aware matching as `_command_references_path` so macOS symlink
+    paths match correctly.
+    """
+    if not path_str:
+        return False
+    try:
+        p = Path(path_str).expanduser()
+    except Exception:
+        return False
+    # Build candidate absolute-path strings for this target.
+    cand_strs = set()
+    cand_strs.add(str(p))
+    try:
+        cand_strs.add(str(p.resolve()))
+    except Exception:
+        pass
+    for c in list(cand_strs):
+        if c.startswith("/private/"):
+            cand_strs.add(c[len("/private"):])
+        elif c.startswith("/tmp/") or c.startswith("/var/folders/"):
+            cand_strs.add("/private" + c)
+    for vault in vaults:
+        vault_variants = _path_variants(vault)
+        for cs in cand_strs:
+            for vv in vault_variants:
+                try:
+                    if cs == vv or cs.startswith(vv.rstrip("/") + "/"):
+                        return True
+                except Exception:
+                    continue
+    return False
+
+
+def _redirection_target_touches_vault(command, vaults):
+    """Return True iff the command has a redirection target inside any vault."""
+    targets = _redirection_targets(command)
+    if not targets:
+        # No redirection in this command; the caller must fall back to the
+        # broader reference check.
+        return None
+    for t in targets:
+        if _path_is_under_any_vault(t, vaults):
             return True
     return False
 
@@ -267,16 +460,18 @@ def _handle_bash(tool_input):
     if not cfg.exists():
         _allow()
 
-    try:
-        cfg_resolved_str = str(cfg.resolve())
-    except Exception:
-        cfg_resolved_str = str(cfg)
-    touches_cfg = (
-        str(cfg) in command
-        or cfg_resolved_str in command
-    )
+    cfg_variants = _path_variants(cfg)
+    touches_cfg = any(v in command for v in cfg_variants)
     if touches_cfg and _command_has_write_verb(command):
-        _block(_bash_block_message(command, "write targeting vaults.json"))
+        # Special case: redirection-only writes whose target is not the
+        # config file itself are legitimate (e.g. `cat vaults.json > /tmp/x`).
+        if (
+            not _command_has_non_redirect_write_verb(command)
+            and _redirection_target_touches_vault(command, [cfg]) is False
+        ):
+            pass  # fall through to vault check
+        else:
+            _block(_bash_block_message(command, "write targeting vaults.json"))
 
     if _command_invokes_sanctioned_script(command):
         _allow()
@@ -294,8 +489,22 @@ def _handle_bash(tool_input):
     if not touches_vault:
         _allow()
 
-    if _command_has_write_verb(command):
+    # If there's a non-redirect write verb (rm/mv/cp/touch/tee/sed -i/etc.)
+    # and the command references a vault path, block unconditionally. These
+    # verbs take the vault path as a positional arg, so its mere presence is
+    # the smoking gun.
+    if _command_has_non_redirect_write_verb(command):
         _block(_bash_block_message(command, "write targeting a registered vault path"))
+
+    # Otherwise the only write indicator is a redirection. Check whether the
+    # redirection target is inside a vault. If it is → block; if not → allow
+    # (legitimate read-from-vault-write-elsewhere, e.g. `cat /vault/x > /tmp/y`).
+    if _command_has_redirect_write(command):
+        redir_hits_vault = _redirection_target_touches_vault(command, vaults)
+        if redir_hits_vault:
+            _block(_bash_block_message(command, "write targeting a registered vault path"))
+        # redir_hits_vault is False or None — safe to allow.
+        _allow()
 
     _allow()
 

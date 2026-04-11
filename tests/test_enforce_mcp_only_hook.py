@@ -565,3 +565,108 @@ class TestMalformed:
             timeout=10,
         )
         assert result.returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# Security bypass regression tests (T4 follow-up)
+# ---------------------------------------------------------------------------
+
+class TestSecurityBypasses:
+    """Regression tests for bypasses flagged in T4 code review.
+
+    These tests intentionally use tempfile.mkdtemp() for Issue 1 so pytest's
+    tmp_path fixture (which pre-resolves on macOS) can't mask the bypass.
+    """
+
+    def test_bash_bypass_via_macos_symlink_prefix(self):
+        """Issue 1: macOS /tmp → /private/tmp or /var/folders → /private/var/folders
+        substring mismatch lets a Bash write sneak past the vault check.
+
+        If the vault is registered with an unresolved path (as the agent wrote
+        it in vaults.json) but the hook only searches for the .resolve()'d form,
+        the command's literal path never matches.
+        """
+        import tempfile
+        import os
+
+        raw_root = tempfile.mkdtemp(prefix="sb_symlink_test_")
+        try:
+            vault = Path(raw_root) / "cowork"
+            vault.mkdir()
+            (vault / "brain").mkdir()
+
+            config_path = Path(raw_root) / "config" / "secondbrain" / "vaults.json"
+            write_vaults_config(config_path, [vault])
+
+            # Agent writes command using the unresolved path (as provided by env).
+            # If raw_root was '/var/folders/...', the resolved form is '/private/var/folders/...'.
+            # The hook must catch both.
+            command = f"rm {vault}/brain/status.md"
+            code, _, _ = run_hook_bash(command, vaults_config_path=config_path)
+            assert code == 2, f"expected block for {command}; got {code}"
+        finally:
+            import shutil
+            shutil.rmtree(raw_root, ignore_errors=True)
+
+    def test_echo_literal_script_name_not_sanctioned(
+        self, isolated_env: tuple[Path, Path]
+    ):
+        """Issue 2: `echo archive_inbox.py > /vault/x.md` should NOT be treated
+        as a sanctioned-script invocation. The current substring check lets the
+        write sneak through because the string 'archive_inbox.py' appears in
+        the command.
+        """
+        vault, config = isolated_env
+        write_vaults_config(config, [vault])
+        command = f"echo archive_inbox.py > {vault}/brain/status.md"
+        code, _, _ = run_hook_bash(command, vaults_config_path=config)
+        assert code == 2, f"expected block for {command}; got {code}"
+
+    def test_chained_sanctioned_script_after_vault_write_not_sanctioned(
+        self, isolated_env: tuple[Path, Path]
+    ):
+        """Issue 2: `rm /vault/x.md && python3 verify_vault.py` should NOT be
+        allowed. The rm is the primary action; the trailing sanctioned call
+        shouldn't grant it a free pass.
+        """
+        vault, config = isolated_env
+        write_vaults_config(config, [vault])
+        command = f"rm {vault}/brain/status.md && python3 verify_vault.py"
+        code, _, _ = run_hook_bash(command, vaults_config_path=config)
+        assert code == 2, f"expected block for {command}; got {code}"
+
+    def test_sed_i_variants_blocked(self, isolated_env: tuple[Path, Path]):
+        """Issue 3: `sed -i` regex misses common variants:
+          - `sed -i.bak` (GNU backup suffix)
+          - `sed -iE` (combined flags)
+          - `sed -i ''` (macOS BSD sed idiom, requires empty-string arg)
+        """
+        vault, config = isolated_env
+        write_vaults_config(config, [vault])
+
+        variants = [
+            f"sed -i.bak 's/old/new/' {vault}/brain/status.md",
+            f"sed -iE 's/old/new/' {vault}/brain/status.md",
+            f"sed -i '' 's/old/new/' {vault}/brain/status.md",
+        ]
+        for command in variants:
+            code, _, _ = run_hook_bash(command, vaults_config_path=config)
+            assert code == 2, f"expected block for {command}; got {code}"
+
+    def test_read_vault_redirect_to_non_vault_allowed(
+        self, tmp_path: Path, isolated_env: tuple[Path, Path]
+    ):
+        """Issue 4: `cat /vault/brain/status.md > /tmp/backup.md` is a legitimate
+        read-from-vault-write-elsewhere. It must be allowed.
+
+        (This test currently passes because Issue 1's bug hides the problem:
+        the command references a vault path but the hook's path matching is
+        broken. After Issue 1 is fixed this will start failing without the
+        Issue 4 fix.)
+        """
+        vault, config = isolated_env
+        write_vaults_config(config, [vault])
+        outside = tmp_path / "backup.md"
+        command = f"cat {vault}/brain/status.md > {outside}"
+        code, _, _ = run_hook_bash(command, vaults_config_path=config)
+        assert code == 0, f"expected allow for {command}; got {code}"
