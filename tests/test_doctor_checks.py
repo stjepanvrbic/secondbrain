@@ -200,17 +200,24 @@ class TestCheckObsidianApiKey:
         assert r.status == "pass"
         assert r.fixable is False
 
-    def test_fail_when_missing(self, clean_env: None):
+    def test_missing_api_key_not_fixable(self, clean_env: None):
+        """Doctor cannot mint an API key — it must come from Obsidian's Connect
+        MCP plugin. Advertising a fix here would be a lie because
+        `setup_env_vars(api_key=None, port=None)` short-circuits to a no-op.
+        """
         del clean_env
         r = check_obsidian_api_key()
         assert r.status == "fail"
-        assert r.fixable is True
-        assert r.fix_function == "setup_env_vars"
+        assert r.fixable is False
+        assert r.fix_function is None
+        # Escalation should send users to init or shell config.
+        assert ("/secondbrain:init" in r.message) or ("shell config" in r.message)
 
     def test_fail_when_empty(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("OBSIDIAN_API_KEY", "")
         r = check_obsidian_api_key()
         assert r.status == "fail"
+        assert r.fixable is False
 
 
 # ---------------------------------------------------------------------------
@@ -223,17 +230,23 @@ class TestCheckObsidianMcpPort:
         r = check_obsidian_mcp_port()
         assert r.status == "pass"
 
-    def test_fail_when_missing(self, clean_env: None):
+    def test_missing_port_not_fixable(self, clean_env: None):
+        """Doctor cannot guess which port to write — user must either run
+        /secondbrain:init (which prompts for it) or export it themselves.
+        """
         del clean_env
         r = check_obsidian_mcp_port()
         assert r.status == "fail"
-        assert r.fixable is True
-        assert r.fix_function == "setup_env_vars"
+        assert r.fixable is False
+        assert r.fix_function is None
+        assert ("/secondbrain:init" in r.message) or ("OBSIDIAN_MCP_PORT" in r.message)
 
     def test_fail_when_non_numeric(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("OBSIDIAN_MCP_PORT", "not-a-number")
         r = check_obsidian_mcp_port()
         assert r.status == "fail"
+        # Still not fixable — user must set a valid number themselves.
+        assert r.fixable is False
 
 
 # ---------------------------------------------------------------------------
@@ -447,12 +460,41 @@ class TestCheckVaultIdentityCross:
         # This is a config conflict — NOT auto-fixable
         assert r.fixable is False
 
-    def test_fail_when_marker_missing_from_fs(self, tmp_path: Path, mock_mcp_client: MagicMock):
+    def test_vault_identity_cross_marker_missing_not_fixable(
+        self, tmp_path: Path, mock_mcp_client: MagicMock
+    ):
+        """Marker entirely missing is NOT auto-fixable.
+
+        Doctor's `write_vault_id` refuses to create a missing marker — only
+        init can do that. So the check must advertise `fixable=False` with an
+        escalation message pointing at `/secondbrain:init`.
+        """
         vault = tmp_path / "vault"
         vault.mkdir()
         r = check_vault_identity_cross(vault, mcp_client=mock_mcp_client)
         assert r.status == "fail"
-        # This IS fixable — write_vault_id can stamp a new one
+        # Previously advertised fixable=True — but write_vault_id refuses to
+        # create missing markers, so advertising that was a lie.
+        assert r.fixable is False
+        assert r.fix_function is None
+        assert "/secondbrain:init" in r.message
+
+    def test_vault_identity_cross_marker_present_no_vault_id_fixable(
+        self, tmp_path: Path, mock_mcp_client: MagicMock
+    ):
+        """Marker present but missing `vault_id` key IS fixable.
+
+        This is the case `write_vault_id` can actually handle — an existing
+        marker that needs a UUID stamped into it.
+        """
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        # Marker exists with valid JSON but no vault_id field.
+        (vault / ".secondbrain-installed").write_text(
+            json.dumps({"steps": ["scaffold: ok"]}, indent=2)
+        )
+        r = check_vault_identity_cross(vault, mcp_client=mock_mcp_client)
+        assert r.status == "fail"
         assert r.fixable is True
         assert r.fix_function == "write_vault_id"
 
@@ -649,6 +691,40 @@ class TestRunAllChecks:
         )
         failures = [r for r in results if r.status == "fail"]
         assert len(failures) > 0
+
+    def test_scheduled_tasks_in_cascade_skip_when_vault_unreachable(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """When vault_reachable fails, downstream filesystem checks — including
+        scheduled_tasks — must be marked `skip` so the result shape stays
+        consistent. Regression guard for the cascade list.
+        """
+        monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(tmp_path))
+        monkeypatch.setenv("OBSIDIAN_API_KEY", "key")
+        monkeypatch.setenv("OBSIDIAN_MCP_PORT", "27124")
+        # Vault path deliberately doesn't exist → vault_reachable fails.
+        missing_vault = tmp_path / "nope"
+        results = run_all_checks(
+            vault_path=missing_vault,
+            plugin_root=tmp_path,
+        )
+        by_name = {r.name: r for r in results}
+        assert "vault_reachable" in by_name
+        assert by_name["vault_reachable"].status == "fail"
+        # Every downstream vault-side check must be present as a skip —
+        # scheduled_tasks included.
+        for name in (
+            "manifest", "log_md", "profile", "standard_folders",
+            "scheduled_tasks", "last_dream_protocol_run",
+            "hot_memory_schema", "ingest_log_recent_failures",
+        ):
+            assert name in by_name, f"{name} missing from cascade skip"
+            assert by_name[name].status == "skip", (
+                f"{name} should be skip when vault unreachable, "
+                f"got {by_name[name].status}"
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -153,19 +153,26 @@ def check_environment() -> CheckResult:
 
 
 def check_obsidian_api_key() -> CheckResult:
-    """Check 3: OBSIDIAN_API_KEY env var is set and non-empty."""
+    """Check 3: OBSIDIAN_API_KEY env var is set and non-empty.
+
+    Not auto-fixable: doctor cannot mint an API key — it has to be obtained
+    from Obsidian's Connect MCP plugin. Previously this check advertised
+    `setup_env_vars` as a fix target, but `setup_env_vars(api_key=None, ...)`
+    short-circuits to a no-op, so the fix was a lie. Escalate to init instead.
+    """
     key = os.environ.get("OBSIDIAN_API_KEY", "")
     if not key:
         return CheckResult(
             name="obsidian_api_key",
             status="fail",
             message=(
-                "OBSIDIAN_API_KEY is not set. Run /secondbrain:init to set it, "
-                "or add `export OBSIDIAN_API_KEY=\"<key>\"` to your shell "
-                "config (~/.zshrc on Mac, ~/.bashrc on Linux)."
+                "OBSIDIAN_API_KEY is not set. Doctor cannot mint an API key — "
+                "run /secondbrain:init to obtain one from Obsidian's Connect "
+                "MCP plugin, or add `export OBSIDIAN_API_KEY=\"<key>\"` to "
+                "your shell config (~/.zshrc on Mac, ~/.bashrc on Linux) "
+                "manually."
             ),
-            fixable=True,
-            fix_function="setup_env_vars",
+            fixable=False,
         )
     return CheckResult(
         name="obsidian_api_key",
@@ -176,7 +183,13 @@ def check_obsidian_api_key() -> CheckResult:
 
 
 def check_obsidian_mcp_port() -> CheckResult:
-    """Check 4: OBSIDIAN_MCP_PORT env var is set and numeric."""
+    """Check 4: OBSIDIAN_MCP_PORT env var is set and numeric.
+
+    Not auto-fixable: doctor cannot guess which port the user's Connect MCP
+    plugin is bound to. Previously this check advertised `setup_env_vars`,
+    but that helper short-circuits when both `api_key` and `port` are None,
+    so the fix was a structural no-op. Escalate to init instead.
+    """
     port_str = os.environ.get("OBSIDIAN_MCP_PORT", "")
     if not port_str:
         return CheckResult(
@@ -184,11 +197,11 @@ def check_obsidian_mcp_port() -> CheckResult:
             status="fail",
             message=(
                 "OBSIDIAN_MCP_PORT is not set. The plugin's .mcp.json depends "
-                "on it. Run /secondbrain:init to set it, or add "
-                "`export OBSIDIAN_MCP_PORT=\"27124\"` to your shell config."
+                "on it. Run /secondbrain:init to configure it, or add "
+                "`export OBSIDIAN_MCP_PORT=\"27124\"` to your shell config "
+                "manually."
             ),
-            fixable=True,
-            fix_function="setup_env_vars",
+            fixable=False,
         )
     try:
         int(port_str)
@@ -198,10 +211,10 @@ def check_obsidian_mcp_port() -> CheckResult:
             status="fail",
             message=(
                 f"OBSIDIAN_MCP_PORT={port_str!r} is not a valid integer. "
-                "Fix: export OBSIDIAN_MCP_PORT=\"27124\""
+                "Run /secondbrain:init to fix it, or "
+                "`export OBSIDIAN_MCP_PORT=\"27124\"` manually."
             ),
-            fixable=True,
-            fix_function="setup_env_vars",
+            fixable=False,
         )
     return CheckResult(
         name="obsidian_mcp_port",
@@ -610,16 +623,20 @@ def check_vault_identity_cross(
 
     # FS side first.
     if not marker.exists():
+        # Doctor CANNOT auto-fix this — setup_steps.write_vault_id explicitly
+        # refuses to create a missing marker ("init must create it first").
+        # Advertising fixable=True here would lie to the user: they'd approve
+        # the fix, nothing would happen, and the re-diagnostic would show the
+        # same failure. Escalate to /secondbrain:init instead.
         return CheckResult(
             name="vault_identity_cross",
             status="fail",
             message=(
-                f"vault marker missing at {marker}. Doctor can mint a new "
-                "vault_id via write_vault_id during treatment (this only "
-                "works if init created the marker first)."
+                f"vault marker missing at {marker}. Doctor cannot create the "
+                "marker from scratch — only /secondbrain:init can. Run "
+                "/secondbrain:init against this vault to bootstrap it."
             ),
-            fixable=True,
-            fix_function="write_vault_id",
+            fixable=False,
         )
 
     try:
@@ -972,11 +989,14 @@ def run_all_checks(
     results.append(vault_reachable_result)
 
     if vault_reachable_result.status == "fail":
-        # Cascading skip for filesystem-dependent checks.
+        # Cascading skip for filesystem-dependent checks. Any check whose
+        # normal-path branch runs only when the vault is reachable must be
+        # emitted here as a skip — otherwise callers that index results by
+        # name will see a ragged shape between healthy and broken vaults.
         for name in (
             "manifest", "log_md", "profile", "standard_folders",
-            "last_dream_protocol_run", "hot_memory_schema",
-            "ingest_log_recent_failures",
+            "scheduled_tasks", "last_dream_protocol_run",
+            "hot_memory_schema", "ingest_log_recent_failures",
         ):
             results.append(CheckResult(
                 name=name,
@@ -1063,23 +1083,11 @@ def run_fixable_treatments(
             continue
 
         # Each fix function takes (vault_path: Path) plus optional kwargs.
-        # setup_env_vars is the odd one out — it takes (api_key, port, ...) —
-        # so we special-case it here with env-var lookups.
+        # Checks that used to dispatch setup_env_vars are now fixable=False —
+        # doctor cannot mint an API key or guess a port, so those failures
+        # escalate to /secondbrain:init and never reach this dispatcher.
         try:
-            if result.fix_function == "setup_env_vars":
-                # Env-var fix — read what we have, ask setup_env_vars to
-                # write whatever the shell config is missing. If both are
-                # None it becomes a no-op.
-                api_key = os.environ.get("OBSIDIAN_API_KEY") or None
-                port_str = os.environ.get("OBSIDIAN_MCP_PORT")
-                port: Optional[int] = None
-                if port_str:
-                    try:
-                        port = int(port_str)
-                    except ValueError:
-                        port = None
-                step_result = fix_fn(api_key=api_key, port=port)
-            elif result.fix_function == "setup_profile":
+            if result.fix_function == "setup_profile":
                 step_result = fix_fn(vault_path, interactive=interactive)
             elif result.fix_function == "add_vault_to_config":
                 # Needs a vault_id and name — read them from the marker.

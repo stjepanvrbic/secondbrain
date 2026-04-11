@@ -106,9 +106,10 @@ class TestFixableVsEscalationListed:
     def test_auto_fixable_checks_listed(self):
         content = _content()
         # The auto-fixable table must mention the fix function names
-        # from doctor_checks.
+        # from doctor_checks. setup_env_vars was removed in the T5 follow-up
+        # because it was a structural no-op — env-var failures now escalate
+        # to /secondbrain:init.
         fixable_fns = (
-            "setup_env_vars",
             "rebuild_manifest",
             "create_log_md",
             "setup_profile",
@@ -119,6 +120,36 @@ class TestFixableVsEscalationListed:
         assert not missing, (
             f"Skill must list every auto-fixable fix function. "
             f"Missing: {missing}"
+        )
+
+    def test_env_var_checks_escalate_not_autofix(self):
+        """OBSIDIAN_API_KEY / OBSIDIAN_MCP_PORT failures are NOT auto-fixable —
+        setup_env_vars was dropped from the fixable table because doctor
+        can't mint an API key or guess a port. The skill must escalate these
+        to /secondbrain:init instead.
+        """
+        content = _content()
+        # The fixable TABLE must not advertise setup_env_vars anymore.
+        # (The phrase may still appear in prose, e.g. "setup_env_vars was
+        # removed in..." but we don't allow it to sit under the fixable
+        # header.) Split the SKILL body into sections at "**Auto-fixable"
+        # and check the immediately following table block.
+        fixable_section_start = content.find("**Auto-fixable")
+        assert fixable_section_start != -1, "Auto-fixable section missing"
+        escalation_section_start = content.find("**Escalation-only", fixable_section_start)
+        assert escalation_section_start != -1, "Escalation-only section missing"
+        fixable_table = content[fixable_section_start:escalation_section_start]
+        assert "setup_env_vars" not in fixable_table, (
+            "setup_env_vars should NOT be in the auto-fixable table — "
+            "env-var failures escalate to /secondbrain:init"
+        )
+        # And the escalation table must mention both env vars.
+        escalation_block = content[escalation_section_start:]
+        assert "obsidian_api_key" in escalation_block, (
+            "obsidian_api_key missing from escalation table"
+        )
+        assert "obsidian_mcp_port" in escalation_block, (
+            "obsidian_mcp_port missing from escalation table"
         )
 
     def test_escalation_checks_listed(self):

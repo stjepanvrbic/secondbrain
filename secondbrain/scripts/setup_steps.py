@@ -808,25 +808,3 @@ def setup_profile(vault_path: Path, interactive: bool = True) -> StepResult:
         ),
         did_work=True,
     )
-
-
-def setup_scheduled_tasks(vault_path: Path) -> StepResult:
-    """Placeholder for scheduled-task registration.
-
-    The real work is done by the init skill (which can call CronCreate or
-    emit `/schedule` commands depending on environment). Doctor can't
-    register tasks from a Python subprocess — this function exists so the
-    dispatcher has a target to invoke, and it returns a StepResult that
-    clearly tells the user to run init instead.
-    """
-    del vault_path  # No vault state is touched here.
-    return StepResult(
-        success=False,
-        message=(
-            "setup_scheduled_tasks: doctor cannot register scheduled tasks "
-            "from a subprocess. Run /secondbrain:init to install them "
-            "(Code uses CronCreate; Cowork emits /schedule commands)."
-        ),
-        did_work=False,
-        error="scheduled tasks must be registered by the init skill",
-    )

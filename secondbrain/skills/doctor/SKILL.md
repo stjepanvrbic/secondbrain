@@ -86,22 +86,23 @@ question, and then **STOP**.
 
 | Check | Fix function |
 |-------|--------------|
-| `obsidian_api_key` (Check 3, env var missing) | `setup_env_vars` |
-| `obsidian_mcp_port` (Check 4, env var missing) | `setup_env_vars` |
 | `manifest` (Check 8, `_MANIFEST.md` missing) | `rebuild_manifest` |
 | `log_md` (Check 9, `log.md` missing) | `create_log_md` |
 | `profile` (Check 10, placeholders or missing) | `setup_profile` |
 | `standard_folders` (Check 11, folders missing) | `setup_vault_scaffolding` |
-| `vault_identity_cross` (marker missing `vault_id`) | `write_vault_id` |
+| `vault_identity_cross` (marker present but missing `vault_id` field) | `write_vault_id` |
 
 **Escalation-only (doctor CANNOT fix — tell the user):**
 
 | Check | Escalation |
 |-------|-----------|
 | `plugin_root` (Check 1) | `/plugin install stjepanvrbic/secondbrain` |
+| `obsidian_api_key` (Check 3, env var missing) | run `/secondbrain:init` to obtain and write a key, or set `OBSIDIAN_API_KEY` manually in your shell config |
+| `obsidian_mcp_port` (Check 4, env var missing) | run `/secondbrain:init` to configure, or `export OBSIDIAN_MCP_PORT="27124"` manually |
 | `obsidian_running` (Check 5) | open `/Applications/Obsidian.app` |
 | `mcp_connection` (Check 6) | check the Connect MCP plugin is enabled in Obsidian |
 | `vault_identity_cross` MISMATCH (Check 6.5) | reconcile `VAULT_PATH` vs the open Obsidian vault — this is a config conflict, NOT a fix target |
+| `vault_identity_cross` MARKER MISSING (Check 6.5) | run `/secondbrain:init` — doctor cannot create the marker from scratch, only init can |
 | `scheduled_tasks` (Check 12) | run `/secondbrain:init` to install tasks |
 | `last_dream_protocol_run` (Check 13, warning) | run `/secondbrain:dream-protocol` manually |
 | `core_hooks_path` (Check 15) | run `python3 secondbrain/scripts/install_git_hooks.py` from the repo |
@@ -133,8 +134,10 @@ On confirmation:
 - Phase 2 NEVER registers scheduled tasks — scheduled-task registration
   requires the agent session to call `CronCreate` directly, and the CLI
   subprocess can't do that.
-- Phase 2 NEVER modifies the user's shell config without first telling
-  them it did so and instructing them to `source` the config.
+- Phase 2 NEVER writes environment variables to the user's shell config.
+  `OBSIDIAN_API_KEY` and `OBSIDIAN_MCP_PORT` are init's responsibility —
+  doctor cannot mint a new API key or guess a port, so those failures
+  always escalate to `/secondbrain:init`.
 
 # Forbidden Actions
 
@@ -183,14 +186,16 @@ secondbrain doctor report:
   [PASS] plugin_root: CLAUDE_PLUGIN_ROOT=/Users/you/.claude/plugins/...
   [PASS] environment: environment: Claude Code
   [FAIL] obsidian_api_key: OBSIDIAN_API_KEY is not set. ...
-         -> doctor can fix this (runs setup_env_vars)
+         -> escalation: run /secondbrain:init (doctor cannot mint an API key)
   [FAIL] obsidian_mcp_port: OBSIDIAN_MCP_PORT is not set. ...
-         -> doctor can fix this (runs setup_env_vars)
+         -> escalation: run /secondbrain:init or export manually
   [PASS] obsidian_running: Obsidian process detected via pgrep
   [SKIP] mcp_connection: skipped because OBSIDIAN_API_KEY / OBSIDIAN_MCP_PORT are not set
+  [FAIL] log_md: log.md (append-only audit trail) is missing. ...
+         -> doctor can fix this (runs create_log_md)
   ...
 
   Result: 7 passed, 3 failed, 0 warning, 5 skipped.
 
-  I can fix 2 of these — want me to? (yes/no)
+  I can fix 1 of these — want me to? (yes/no)
 ```
