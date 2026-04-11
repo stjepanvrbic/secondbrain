@@ -44,6 +44,7 @@ CLI_ENTRYPOINT_ALLOWLIST = {
     "bump_version.py",         # dev-only: used by pre-push hook and CI
     "install_git_hooks.py",    # dev-only: documented in repo-root CONTRIBUTING.md
     "setup_steps.py",          # library-only: imported by init + doctor (wired up in T3/T6)
+    "connect_mcp_client.py",   # library-only: imported by dream/hot-memory/doctor (wired up in T10/T11/T13/T14)
 }
 
 # Dirs the installer SHIPS to users. Nothing under here may contain dev cruft.
