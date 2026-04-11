@@ -13,9 +13,9 @@ config is never touched.
 
 from __future__ import annotations
 
-import importlib
 import json
 import os
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -240,7 +240,8 @@ class TestAddVaultToConfig:
         assert "added_at" in entry
         assert "with_push" in entry
 
-    def test_idempotent_no_changes(self, isolated_config: Path, tmp_path: Path):
+    @pytest.mark.usefixtures("isolated_config")
+    def test_idempotent_no_changes(self, tmp_path: Path):
         vault = tmp_path / "vault1"
         vault.mkdir()
         first = add_vault_to_config(vault, "id-1", "Vault One")
@@ -348,7 +349,8 @@ class TestListConfiguredVaults:
         vaults = list_configured_vaults()
         assert vaults == []
 
-    def test_returns_entries(self, isolated_config: Path, tmp_path: Path):
+    @pytest.mark.usefixtures("isolated_config")
+    def test_returns_entries(self, tmp_path: Path):
         v1 = tmp_path / "vault1"; v1.mkdir()
         v2 = tmp_path / "vault2"; v2.mkdir()
         add_vault_to_config(v1, "id-1", "First")
@@ -368,7 +370,8 @@ class TestListConfiguredVaults:
 
 
 class TestGetActiveVault:
-    def test_none_when_no_config(self, isolated_config: Path):
+    @pytest.mark.usefixtures("isolated_config")
+    def test_none_when_no_config(self):
         assert get_active_vault() is None
 
     def test_none_when_active_unset(self, isolated_config: Path):
@@ -381,7 +384,8 @@ class TestGetActiveVault:
         }))
         assert get_active_vault() is None
 
-    def test_returns_active_entry(self, isolated_config: Path, tmp_path: Path):
+    @pytest.mark.usefixtures("isolated_config")
+    def test_returns_active_entry(self, tmp_path: Path):
         v1 = tmp_path / "vault1"; v1.mkdir()
         add_vault_to_config(v1, "id-1", "First")
         active = get_active_vault()
@@ -395,10 +399,12 @@ class TestGetActiveVault:
 # ---------------------------------------------------------------------------
 
 class TestListVaultPathsForHooks:
-    def test_empty_when_pre_init(self, isolated_config: Path):
+    @pytest.mark.usefixtures("isolated_config")
+    def test_empty_when_pre_init(self):
         assert list_vault_paths_for_hooks() == []
 
-    def test_returns_absolute_paths(self, isolated_config: Path, tmp_path: Path):
+    @pytest.mark.usefixtures("isolated_config")
+    def test_returns_absolute_paths(self, tmp_path: Path):
         v1 = tmp_path / "vault1"; v1.mkdir()
         v2 = tmp_path / "vault2"; v2.mkdir()
         add_vault_to_config(v1, "id-1", "First")
@@ -480,16 +486,19 @@ class TestSetupEnvVars:
 # ---------------------------------------------------------------------------
 
 class TestImportHygiene:
-    def test_importable_without_side_effects(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """Re-importing setup_steps should not touch the filesystem."""
+    def test_importable_without_side_effects(self, tmp_path: Path):
+        """Importing setup_steps in a fresh process should not touch the filesystem."""
         # Point the override at a location that must NOT be created by import.
         probe = tmp_path / "should-not-exist" / "vaults.json"
-        monkeypatch.setenv("SECONDBRAIN_VAULTS_CONFIG", str(probe))
-
-        # Force re-import.
-        if "setup_steps" in sys.modules:
-            del sys.modules["setup_steps"]
-        importlib.import_module("setup_steps")
-
+        scripts_dir = Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"
+        env = {**os.environ, "SECONDBRAIN_VAULTS_CONFIG": str(probe)}
+        result = subprocess.run(
+            [sys.executable, "-c", "import setup_steps"],
+            cwd=str(scripts_dir),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"import failed: {result.stderr}"
         assert not probe.exists()
         assert not probe.parent.exists()
