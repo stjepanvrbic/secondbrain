@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
@@ -432,10 +434,15 @@ class TestMain:
         # Nothing should have been created in dry run
         assert not (tmp_path / "brain" / "status.md").exists()
 
-    def test_full_setup_skip_install(self, tmp_path: Path):
+    def test_full_setup_skip_install(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        import uuid as _uuid
         vault = tmp_path / "test-vault"
         fake_rc = tmp_path / ".zshrc"
         fake_rc.write_text("")
+        monkeypatch.setenv(
+            "SECONDBRAIN_VAULTS_CONFIG",
+            str(tmp_path / "config" / "vaults.json"),
+        )
         with patch.dict("init_obsidian.SHELL_CONFIGS", {"zsh": fake_rc}):
             code = main(["--vault-path", str(vault), "--skip-install"])
         assert code == 0
@@ -443,12 +450,24 @@ class TestMain:
         assert (vault / "brain" / "status.md").exists()
         assert (vault / "entities").is_dir()
         assert (vault / ".obsidian").is_dir()
-        assert (vault / ".secondbrain-installed").exists()
 
-    def test_idempotent_run(self, tmp_path: Path):
+        marker = vault / ".secondbrain-installed"
+        assert marker.exists()
+        data = json.loads(marker.read_text())
+        # T3: the marker now carries a stable vault_id (UUID4) and timestamps.
+        assert "vault_id" in data
+        assert _uuid.UUID(data["vault_id"]).version == 4
+        assert "installed_at" in data
+        assert "last_init_at" in data
+
+    def test_idempotent_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         vault = tmp_path / "vault"
         fake_rc = tmp_path / ".zshrc"
         fake_rc.write_text("")
+        monkeypatch.setenv(
+            "SECONDBRAIN_VAULTS_CONFIG",
+            str(tmp_path / "config" / "vaults.json"),
+        )
         with patch.dict("init_obsidian.SHELL_CONFIGS", {"zsh": fake_rc}):
             main(["--vault-path", str(vault), "--skip-install"])
             # Run again — should still succeed

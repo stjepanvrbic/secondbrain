@@ -87,7 +87,7 @@ Print: `Detected environment: Claude Code` (or `Claude Cowork`).
 
 ## 1b. Detect first-install vs re-init
 
-Check for `~/.secondbrain-installed` marker file.
+Check for `.secondbrain-installed` marker file inside the candidate vault path. If VAULT_PATH is set, check at `${VAULT_PATH}/.secondbrain-installed`. If the user specified a vault path during this init run, check at `<that-path>/.secondbrain-installed`.
 - If present: this is a re-init — print "I see you've installed me before. I'll check what's still working and only fix what's broken."
 - If absent: this is a first install.
 
@@ -719,7 +719,7 @@ When invoked with `--verify`, skip Steps 0-8. Run only verification — no creat
 Run these checks and print pass/fail for each:
 
 1. Environment detection (Code vs Cowork) — informational
-2. `~/.secondbrain-installed` marker exists?
+2. `${VAULT_PATH}/.secondbrain-installed` marker exists?
 3. Obsidian process running?
 4. `OBSIDIAN_API_KEY` set?
 5. `OBSIDIAN_MCP_PORT` set?
@@ -770,7 +770,6 @@ Every step has fallback behavior:
 - If a write fails: print the error, ask if the user wants to retry or skip
 - If MCP connection drops mid-setup: print where you stopped, tell the user to fix and re-run `/init` (which will pick up where it left off due to idempotency)
 - If `CronCreate` fails (Code): note the failure, copy the task SKILL.md to `~/Documents/Claude/Scheduled/` anyway, and print the manual command the user can run via `/schedule` later
-- If `git init` fails: skip without error (git is optional)
 - If a prerequisite check is ambiguous: ask the user directly rather than guessing
 
 # Forbidden Actions

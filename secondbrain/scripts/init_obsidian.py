@@ -26,6 +26,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import uuid
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -799,6 +800,97 @@ def run_rebuild_manifest(vault_path: Path, dry_run: bool = False) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Install marker — .secondbrain-installed with vault_id + timestamps
+# ---------------------------------------------------------------------------
+
+def write_install_marker(
+    vault_path: Path,
+    results: Dict[str, Any],
+    dry_run: bool,
+) -> None:
+    """Write `${vault_path}/.secondbrain-installed` and register the vault.
+
+    Marker lifecycle (idempotent):
+      - On first install: generate a new UUID4 for `vault_id`, stamp
+        `installed_at` and `last_init_at` with today's date.
+      - On re-run: preserve the existing `vault_id` and `installed_at`; only
+        update `last_init_at`.
+      - Legacy markers missing these fields get them added without losing
+        any existing `steps` / `errors` / `platform` keys.
+      - An invalid (non-UUID) `vault_id` is replaced with a fresh UUID4 —
+        defends against hand-edits that drop garbage into the file.
+
+    After writing the marker, the vault is registered in
+    `~/.config/secondbrain/vaults.json` via `setup_steps.add_vault_to_config`.
+    Re-running is a no-op (the config helper deduplicates by vault_id).
+
+    If `dry_run=True`, neither the marker nor the vaults.json entry is touched.
+    The marker lives inside the vault (not in ~/) so it doesn't pollute the
+    user's home directory during tests or CI runs.
+    """
+    marker = vault_path / ".secondbrain-installed"
+
+    # Load any existing marker — we want to preserve vault_id + installed_at.
+    existing: Dict[str, Any] = {}
+    if marker.exists():
+        try:
+            raw = marker.read_text()
+            if raw.strip():
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    existing = parsed
+        except (OSError, json.JSONDecodeError):
+            # Corrupt marker — treat as empty and let the write overwrite it.
+            existing = {}
+
+    # Preserve or mint vault_id. An existing-but-invalid UUID is regenerated.
+    vault_id = existing.get("vault_id")
+    if not isinstance(vault_id, str) or not vault_id:
+        vault_id = str(uuid.uuid4())
+    else:
+        try:
+            uuid.UUID(vault_id)
+        except ValueError:
+            vault_id = str(uuid.uuid4())
+
+    today = date.today().isoformat()
+    installed_at = existing.get("installed_at") if isinstance(existing.get("installed_at"), str) else None
+    if not installed_at:
+        installed_at = today
+
+    results["vault_id"] = vault_id
+    results["installed_at"] = installed_at
+    results["last_init_at"] = today
+
+    if dry_run:
+        print(f"\nWould write marker to {marker}")
+        return
+
+    marker.write_text(json.dumps(results, indent=2))
+    print(f"\nResults written to {marker}")
+
+    # Register this vault in ~/.config/secondbrain/vaults.json. Import locally
+    # so setup_steps is only loaded when init actually runs (avoids circular
+    # import risk and keeps module-level import surface small).
+    try:
+        import setup_steps  # type: ignore[reportMissingImports]
+    except ImportError as exc:
+        print(f"  Note: could not import setup_steps ({exc}); vault not registered")
+        return
+
+    reg = setup_steps.add_vault_to_config(
+        vault_path=vault_path,
+        vault_id=vault_id,
+        name=vault_path.name,
+        role="personal",
+    )
+    if reg.success:
+        print(f"  Vault registered: {reg.message}")
+    else:
+        print(f"  Warning: vault registration failed: {reg.message}")
+
+
+# ---------------------------------------------------------------------------
 # Main orchestration
 # ---------------------------------------------------------------------------
 
@@ -964,11 +1056,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("\nNext step: Open Obsidian, enable the connect-mcp plugin,")
         print("then re-run this script to pick up the generated API key.")
 
-    # Write marker inside the vault (not home dir — avoids polluting user env during tests)
-    marker = vault_path / ".secondbrain-installed"
-    if not dry_run:
-        marker.write_text(json.dumps(results, indent=2))
-    print(f"\nResults written to {marker}")
+    # Write marker inside the vault (not home dir — avoids polluting user env during tests).
+    # write_install_marker handles vault_id + timestamps idempotently and
+    # registers the vault in ~/.config/secondbrain/vaults.json on real runs.
+    write_install_marker(vault_path, results, dry_run)
 
     return 1 if results["errors"] else 0
 
