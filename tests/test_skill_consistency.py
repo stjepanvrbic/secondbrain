@@ -280,3 +280,73 @@ class TestNoDeprecatedPaths:
                     f"allowlist entry — leaving it in place would silently "
                     f"exempt a future regression."
                 )
+
+
+# ----------------------------------------------------------------------
+# Theme 2 single-sourcing: required reference loads
+# ----------------------------------------------------------------------
+#
+# Single-sourcing only helps if the consuming skills actually load the
+# canonical file. If a Theme 2 refactor stops loading `ingestion-rules.md`
+# in `ingest/SKILL.md`, the rules silently diverge again and the whole
+# point of Theme 2 is defeated. These tests enforce the load contract:
+# each canonical reference has a fixed set of consuming skills, and each
+# consumer must load it via `@${CLAUDE_PLUGIN_ROOT}/references/<name>.md`.
+#
+# Adding a consumer to this map is a deliberate lint rule — only do it
+# when the skill genuinely needs the shared rules. Removing a consumer is
+# a deliberate decoupling — do it only when the skill no longer writes to
+# the vault / queries DQL / invokes the script suite.
+
+REQUIRED_REFERENCE_LOADS: dict[str, frozenset[str]] = {
+    # Shared write rules (wikilinks, metadata field order, atomic sections,
+    # entity stub creation, no-new-task-files, immediate flush). Every skill
+    # that writes to the vault loads these.
+    "references/ingestion-rules.md": frozenset({
+        "skills/ingest/SKILL.md",
+        "skills/session-end/SKILL.md",
+        "skills/dream-protocol/SKILL.md",
+        "skills/email-triage/SKILL.md",
+    }),
+}
+
+
+class TestRequiredReferenceLoads:
+    """Every Theme 2 canonical reference must be loaded by every skill
+    that depends on its content.
+    """
+
+    def test_all_required_loads_present(self):
+        missing: list[str] = []
+
+        for ref_path, consumers in REQUIRED_REFERENCE_LOADS.items():
+            # Sanity: the target file itself exists.
+            target = PLUGIN_ROOT / ref_path
+            assert target.exists(), (
+                f"REQUIRED_REFERENCE_LOADS lists {ref_path!r}, but that "
+                f"file does not exist. Fix the map or create the file."
+            )
+
+            for consumer_rel in consumers:
+                consumer = PLUGIN_ROOT / consumer_rel
+                if not consumer.exists():
+                    missing.append(
+                        f"{consumer_rel}: consumer declared in "
+                        f"REQUIRED_REFERENCE_LOADS does not exist"
+                    )
+                    continue
+                text = consumer.read_text(errors="replace")
+                # Match both `@${CLAUDE_PLUGIN_ROOT}/references/<name>.md`
+                # and bare `${CLAUDE_PLUGIN_ROOT}/references/<name>.md`.
+                if ref_path not in text:
+                    missing.append(
+                        f"{consumer_rel}: does not load "
+                        f"@${{CLAUDE_PLUGIN_ROOT}}/{ref_path}"
+                    )
+
+        assert not missing, (
+            "Theme 2 single-sourcing contract violated — consumer skills "
+            "are not loading their canonical reference. Add the @-load "
+            "directive or remove the skill from REQUIRED_REFERENCE_LOADS.\n\n"
+            + "\n".join(f"  - {m}" for m in missing)
+        )
