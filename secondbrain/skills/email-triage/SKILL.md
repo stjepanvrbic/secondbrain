@@ -41,19 +41,22 @@ Gmail read-status is the **only** durable record that a given email was processe
 
 If a subagent crashes between "wrote signal to vault" and "marked read", the next triage run will re-fetch the email and idempotently re-ingest it — duplicate detection in the ingest paths (already required by "Duplicate action item: check status.md before adding" under Error Handling) absorbs the overlap. The reverse failure — marked-read-but-not-written — is unrecoverable and silently drops signal. Never allow the reverse order.
 
-To cover crashes that land mid-batch (after some emails are already fully processed, and before the batch terminates cleanly), each subagent also writes a per-batch **in-flight manifest** at `scratch/email-triage-in-flight.md` before it touches any email, and deletes the manifest only after the whole batch has drained with zero outstanding errors. See "In-Flight Manifest" below.
+To cover crashes that land mid-batch (after some emails are already fully processed, and before the batch terminates cleanly), each subagent also writes its own **per-subagent in-flight manifest** at `scratch/email-triage-in-flight-{batch-id}.md` before it touches any email, and deletes that manifest only after the whole batch has drained with zero outstanding errors. Each subagent owns its own file — siblings never share a manifest, eliminating concurrent-write races. See "In-Flight Manifest" below.
 
 # Triage Algorithm
 
 ```
-1. RECOVER: read scratch/email-triage-in-flight.md via vault_read.
-   If it exists, it is a leftover from a prior crashed run.
-   Re-fetch every listed email ID (they may already be marked read in Gmail —
-   re-ingest them anyway; signal-extraction is idempotent via the
-   duplicate-task check in Error Handling) and run the per-email flow in
-   step 4 below on each. Delete the manifest via vault_delete once all
-   listed IDs have been reconciled.
-   If it does not exist, skip to step 2.
+1. RECOVER: list scratch/ via vault_list and collect every file matching
+   the glob `email-triage-in-flight-*.md`. Each match is a leftover manifest
+   from a prior crashed subagent. For EACH orphan file:
+     - vault_read it to pull out the listed email IDs
+     - Re-fetch every listed email ID (they may already be marked read in
+       Gmail — re-ingest them anyway; signal-extraction is idempotent via
+       the duplicate-task check in Error Handling) and run the per-email
+       flow in step 4 below on each
+     - vault_delete that specific orphan file only after every ID in it
+       has been reconciled
+   If no matching files exist, skip to step 2.
 
 2. SEARCH for unread email IDs: is:unread (maxResults: 500, paginate if more)
    The search result is ONLY for collecting email IDs.
@@ -64,10 +67,18 @@ To cover crashes that land mid-batch (after some emails are already fully proces
    Each subagent is invoked with the email-triage skill.
 
    Each subagent, BEFORE fetching any email:
-     WRITE scratch/email-triage-in-flight.md via vault_create listing the
-     email IDs in its batch (see "In-Flight Manifest" format below).
-     If the file already exists from a sibling subagent or prior crash,
-     append this batch's IDs to the existing list rather than overwriting.
+     a. GENERATE a unique batch-id for itself in the format
+        `YYYY-MM-DDTHH-MM-SS-{nnnn}` where the nnnn suffix is 4 random
+        lowercase alphanumeric characters (a-z, 0-9). Example:
+        `2026-04-10T23-30-15-k3p9`. See "In-Flight Manifest" below for the
+        full format specification and rationale. The batch-id MUST NOT
+        contain colons (Obsidian filename-unsafe) and MUST include the
+        random suffix to avoid collisions between subagents spawned in
+        the same second.
+     b. WRITE scratch/email-triage-in-flight-{batch-id}.md via vault_create
+        listing the email IDs in this subagent's batch (see "In-Flight
+        Manifest" format below). The file is owned exclusively by this
+        subagent — no other subagent ever reads, appends to, or writes it.
 
 4. Each subagent, for EACH email ID in its batch, in strict order:
    a. FETCH the full email via get_email using the email ID
@@ -81,7 +92,8 @@ To cover crashes that land mid-batch (after some emails are already fully proces
       in "Category Routing" below). All vault writes follow the shared
       rules in `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`.
       For NOISE, no vault write is required — skip to (e) with an empty
-      touched-files list.
+      touched-files list. NOISE IDs still follow the same step 5 manifest
+      trim after 4(f) archive, exactly like non-NOISE IDs.
    e. VERIFY: run
          python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} \
            --modified-only <files-you-touched> --json
@@ -96,14 +108,19 @@ To cover crashes that land mid-batch (after some emails are already fully proces
       - INFORMATIONAL-ephemeral → mark as read.
       - NOISE → archive, then mark as read.
 
-5. After a subagent's batch drains with zero outstanding errors, the
-   subagent REMOVES its batch's IDs from scratch/email-triage-in-flight.md.
-   When the manifest becomes empty, delete it entirely via vault_delete.
+5. After each email's 4(f) completes (including NOISE archives), the
+   subagent REMOVES that email's ID from its own
+   scratch/email-triage-in-flight-{batch-id}.md via vault_edit or
+   vault_update. Because the file is owned exclusively by this subagent,
+   there is no contention — no sibling is reading or writing it.
+   When the batch drains with zero outstanding errors and the manifest
+   body contains no IDs, delete the file entirely via vault_delete.
 
 6. VERIFY: search is:unread again.
    If unread emails remain, go back to step 2.
    Do NOT finish until unread count is 0.
-   scratch/email-triage-in-flight.md MUST NOT exist when the skill returns.
+   NO scratch/email-triage-in-flight-*.md files may exist when the skill
+   returns — every subagent must have deleted its own manifest.
 ```
 
 # Category Routing
@@ -131,34 +148,44 @@ The per-category routing is email-triage-specific and lives here (not in `ingest
 
 # In-Flight Manifest
 
-`scratch/email-triage-in-flight.md` is a per-batch sidecar that makes a subagent crash recoverable. `scratch/` is a normal vault path — the immutability hook does NOT block `vault_create` / `vault_delete` there — so the subagent manages it directly via the Obsidian MCP, no helper script needed.
+`scratch/email-triage-in-flight-{batch-id}.md` is a **per-subagent** sidecar that makes a subagent crash recoverable. Each subagent owns exactly one manifest file, named with its own unique batch-id — siblings never share a file, so there is no concurrent-write race. `scratch/` is a normal vault path — the immutability hook does NOT block `vault_create` / `vault_edit` / `vault_delete` there — so each subagent manages its own file directly via the Obsidian MCP, no helper script needed.
 
-Format:
+**Batch-id format:** `YYYY-MM-DDTHH-MM-SS-{nnnn}`
+
+- `YYYY-MM-DDTHH-MM-SS` is the local-time ISO-8601 timestamp of when the subagent started, with colons replaced by hyphens (colons are unsafe in Obsidian filenames on some filesystems).
+- `{nnnn}` is a 4-character random suffix drawn from the alphabet `[a-z0-9]` (36^4 = 1,679,616 possible values). The suffix prevents collisions between subagents spawned in the same second, which is possible under parallel dispatch.
+- Full example: `2026-04-10T23-30-15-k3p9`
+- Full filename example: `scratch/email-triage-in-flight-2026-04-10T23-30-15-k3p9.md`
+
+To generate the random suffix, the subagent can sample 4 characters from `abcdefghijklmnopqrstuvwxyz0123456789` however it likes (e.g., by hashing its own invocation context, or by any pseudorandom choice). The only requirement is that two subagents in the same triage run must not end up with the same suffix in the same second.
+
+Format of the manifest file body:
 
 ```markdown
 ---
 created: <ISO timestamp>
+batch_id: <YYYY-MM-DDTHH-MM-SS-nnnn>
 ---
 
 # Email Triage In-Flight
 
-Email IDs currently being processed by email-triage subagent(s). If this
-file exists at the start of a triage run, it is the remnant of a crashed
-prior run — re-fetch every ID below and re-ingest idempotently before
-scanning for new unread mail.
+Email IDs currently being processed by this email-triage subagent. If this
+file still exists at the start of a later triage run, it is the remnant of
+a crashed prior subagent — re-fetch every ID below and re-ingest
+idempotently before scanning for new unread mail, then delete this file.
 
 - <gmail-message-id-1>
 - <gmail-message-id-2>
 - ...
 ```
 
-Lifecycle:
+Lifecycle (per subagent, per file):
 
-1. **Write** with `vault_create` BEFORE fetching any email in the batch. If the file already exists (sibling batch running in parallel, or prior crash), `vault_read` it first and append this batch's IDs to the existing body instead of overwriting.
-2. **Trim** incrementally: after each email is fully processed (vault write verified AND Gmail state mutated), remove its ID from the file via `vault_edit` or `vault_update`. This keeps the manifest a true "still in flight" list so crash recovery never re-processes finished work.
-3. **Delete** with `vault_delete` once the file body contains no IDs.
+1. **Write** with `vault_create` BEFORE fetching any email in the batch. The file is brand new and uniquely named; no sibling should ever be touching it. If `vault_create` fails because a file with the same batch-id already exists, the subagent must regenerate its batch-id (new random suffix) and retry — this is the collision-recovery path.
+2. **Trim** incrementally: after each email is fully processed (vault write verified AND Gmail state mutated in step 4(f), including NOISE archives), remove that email's ID from this subagent's own file via `vault_edit` or `vault_update`. Because the file is owned exclusively by this subagent, there is no contention. This keeps the manifest a true "still in flight" list so crash recovery never re-processes finished work.
+3. **Delete** with `vault_delete` once the batch has drained and the file body contains no IDs.
 
-The file must NOT exist when the email-triage skill returns successfully. Its presence is the signal that the prior run crashed.
+Crash recovery (step 1 of the Triage Algorithm) globs `scratch/email-triage-in-flight-*.md` and handles each orphan file independently — one crashed subagent never blocks recovery of the others, and reconciliation of one orphan never interferes with another. NO file matching that glob may exist when the email-triage skill returns successfully. Any remaining file is the signal that some subagent crashed.
 
 # Labels
 
@@ -207,8 +234,8 @@ Urgent: Follow up with [[entities/mmh]] on LCA status (due tomorrow).
 - **Unknown sender with action item**: Create minimal entity file, flag for review
 - **Duplicate action item**: Check status.md before adding, skip if already exists. This is also the idempotency anchor for crash recovery — an email that was written-but-not-marked-read before a crash will be re-fetched on the next run, and the duplicate check absorbs the second ingest without creating a duplicate task.
 - **Ambiguous urgency**: Default to IMPORTANT, not URGENT
-- **Verification fails mid-email**: `verify_vault.py --modified-only` returned errors on files just written. FIX the errors in the vault (missing entity stub, broken wikilink, etc.) and re-run verification before mutating any Gmail state for that email. Do NOT mark the email read and do NOT remove its ID from `scratch/email-triage-in-flight.md` until verification is clean. If the error is unrecoverable, leave the email unread and leave its ID in the manifest — the next triage run will retry.
-- **In-flight manifest present at start**: Prior run crashed. Re-fetch every listed ID (via `get_email`) and run the per-email flow from step 4 on each before scanning for new unread mail. Delete the manifest only after every listed ID has been reconciled.
+- **Verification fails mid-email**: `verify_vault.py --modified-only` returned errors on files just written. FIX the errors in the vault (missing entity stub, broken wikilink, etc.) and re-run verification before mutating any Gmail state for that email. Do NOT mark the email read and do NOT remove its ID from this subagent's `scratch/email-triage-in-flight-{batch-id}.md` until verification is clean. If the error is unrecoverable, leave the email unread and leave its ID in the manifest — the next triage run will retry via the orphan-file recovery path.
+- **In-flight manifest present at start**: One or more prior subagents crashed. Glob `scratch/email-triage-in-flight-*.md`, and for each orphan file re-fetch every listed ID (via `get_email`) and run the per-email flow from step 4 on each before scanning for new unread mail. Delete each orphan file only after every listed ID in that specific file has been reconciled.
 
 # Implementation Notes
 
@@ -220,4 +247,4 @@ Urgent: Follow up with [[entities/mmh]] on LCA status (due tomorrow).
 - Timestamps in local time (no UTC)
 - Apply "Important" label via `modify_labels` — but ONLY after vault writes have been verified (see Crash-Safety Invariant)
 - The per-email order is fixed: `get_email` → categorize → extract + write → `verify_vault.py --modified-only` → Gmail state mutation. Never reorder these steps. The reverse order silently drops signal on crash.
-- `scratch/email-triage-in-flight.md` is managed directly via the Obsidian MCP (`vault_create`, `vault_read`, `vault_edit`, `vault_delete`). No helper script — `scratch/` is not covered by the immutability hook.
+- `scratch/email-triage-in-flight-{batch-id}.md` files are managed directly via the Obsidian MCP (`vault_create`, `vault_read`, `vault_edit`, `vault_delete`, `vault_list`). No helper script — `scratch/` is not covered by the immutability hook. Each subagent owns exactly one such file; siblings never touch each other's manifest, so there is no shared-writer race.
