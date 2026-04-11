@@ -22,17 +22,21 @@ The architecture follows a **three-layer pattern** that's been described in diff
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Layer 3: Schema (CLAUDE.md, glossary.md)               │
+│  Layer 3: Schema (plugin-injected rules +               │
+│            me/profile.md + glossary.md)                 │
 │  ───────                                                 │
 │  Static configuration. The agent's "personality" and    │
-│  routing rules. Read at every session start.            │
-│  Edited by humans, almost never by the agent.           │
+│  routing rules. Injected by the SessionStart hook as a  │
+│  systemMessage; user-specific bio/rhythms live in       │
+│  me/profile.md (user-curated). Glossary is also         │
+│  user-curated. The agent almost never writes to this    │
+│  layer.                                                  │
 └─────────────────────────────────────────────────────────┘
                           ▲
                           │ governs
                           │
 ┌─────────────────────────────────────────────────────────┐
-│  Layer 2: Wiki (brain/, entities/, me/, log.md, etc.)   │
+│  Layer 2: Wiki (brain/, entities/, log.md, etc.)        │
 │  ───────                                                 │
 │  The volatile, agent-maintained content. Tasks,         │
 │  decisions, people, deadlines, timeline of operations.  │
@@ -52,9 +56,16 @@ The architecture follows a **three-layer pattern** that's been described in diff
 
 | Layer | Purpose | Who writes it | Examples |
 |---|---|---|---|
-| **Schema** | Configuration | Human only | `CLAUDE.md`, `glossary.md` |
-| **Wiki** | Agent-maintained memory | Agent (under schema rules) | `brain/`, `entities/`, `me/`, `log.md`, `_MANIFEST.md` |
+| **Schema** | Configuration | Plugin-owned + human-curated | Plugin-injected routing rules (via the `SessionStart` hook + `references/session-start-bootstrap.md`); `me/profile.md`; `glossary.md` |
+| **Wiki** | Agent-maintained memory | Agent (under schema rules) | `brain/`, `entities/`, `log.md`, `_MANIFEST.md` |
 | **Raw Sources** | Unprocessed input | Human (via brain dumps) | `inbox/`, optional `sources/` |
+
+The schema layer has two sub-parts:
+
+- **Plugin-owned rules** — injected at every session start by the `SessionStart` hook as a compact `systemMessage`, with the verbose authoritative copy in `secondbrain/references/session-start-bootstrap.md`. These ship with the plugin and are updated via plugin releases, not user edits.
+- **User-curated profile** — `me/profile.md` holds the user's bio, daily rhythms, and preferences. Seeded by `/secondbrain:init` and refined organically through conversation. `glossary.md` (terms/acronyms/shorthand) is also user-curated.
+
+Older plugin versions (v3.1.x–v3.3.2) shipped a `CLAUDE.md` template at the vault root. Since v3.3.3 that file is no longer scaffolded — its contents were split between the plugin-injected rules and `me/profile.md`. Any legacy `CLAUDE.md` sitting in a user's vault is orphaned but harmless; the plugin never touches it.
 
 The principle is: **the human curates and directs. The LLM writes and maintains everything in the Wiki layer.** The human never edits Wiki content directly — they brain-dump into the Raw Sources layer, and the agent's `ingest` skill routes the dump into the right Wiki pages.
 
@@ -140,19 +151,20 @@ Append-only means history is reconstructable forever. The `_MANIFEST.md` "Recent
 
 The biggest divergence is **life-management vs knowledge-management orientation**. Karpathy's gist describes building a personal wiki about topics; `secondbrain` is built around running your day, your week, your projects, and your relationships. Both work — they emphasize different things.
 
-Future versions may add an optional `sources/` layer (Karpathy-style raw curated documents) for users who want to use the plugin as a knowledge base alongside life management. Not in v2.5.0.
+Future versions may add an optional `sources/` layer (Karpathy-style raw curated documents) for users who want to use the plugin as a knowledge base alongside life management. Not in v3.3.x.
 
 ---
 
 ## Skill catalog
 
-The plugin ships 13 skills. Most run automatically when a relevant trigger fires; you rarely invoke them by name.
+The plugin ships 14 skills. Most run automatically when a relevant trigger fires; you rarely invoke them by name. `init` and `doctor` are the only skills users typically invoke explicitly (via `/secondbrain:init` and `/secondbrain:doctor`).
 
 | Skill | Purpose | Auto-invoked when |
 |---|---|---|
-| `init` | One-time setup wizard. Verifies prerequisites, scaffolds vault, installs scheduled tasks, seeds profile | User runs `/secondbrain:init` |
-| `session-start` | Loads vault context, builds energy-matched day plan if morning | First action of every session (via SessionStart hook) |
-| `session-end` | Flushes session state to vault, appends `log.md` entry | User signals "done", or SessionEnd hook fires |
+| `init` | One-time setup wizard. Verifies prerequisites, scaffolds vault, installs scheduled tasks, seeds profile | User runs `/secondbrain:init` (explicit) |
+| `doctor` | Read-only 13-point diagnostic; reports pass/fail with fix commands. Never writes | User runs `/secondbrain:doctor` (explicit) |
+| `session-start` | Loads vault context, builds energy-matched day plan if morning | First action of every session (via `SessionStart` hook) |
+| `session-end` | Flushes session state to vault, appends `log.md` entry | User signals "done", or `SessionEnd` hook fires |
 | `ingest` | Routes brain dumps to vault with mandatory wikilinks | User pastes text, says "brain dump", or session-start finds unprocessed inbox files |
 | `knowledge-search` | Vault-backed query with citations | User asks about their own context (people, dates, decisions, status) |
 | `whats-next` | Picks ONE next task, energy-matched, no options | User asks "what's next" or starts a session without a task |
@@ -161,10 +173,10 @@ The plugin ships 13 skills. Most run automatically when a relevant trigger fires
 | `deadline-check` | Lightweight midday scan, auto-promote urgent tasks | Scheduled at 1pm |
 | `end-of-day` | Review day vs plan, prompt for brain dump, flush state | Scheduled at evening shutdown time |
 | `weekly-review` | Full Sunday audit, build next week's plan | Scheduled Sunday 8pm |
-| `dream-protocol` | Nightly vault maintenance — lint, consolidate, rebuild manifest | Scheduled 2am (nightly) |
-| `vault-review` | On-demand version of dream-protocol | User asks for manual audit |
+| `dream-protocol` | Nightly vault maintenance — lint, consolidate, rebuild manifest | Scheduled 2am (nightly) or invoked by `init` for first-time setup |
+| `vault-review` | On-demand vault audit (focused deadline review or full weekly audit) | User asks "how am I doing?", "what's overdue?", "audit my tasks", etc. |
 
-The `init` skill is the only one users invoke explicitly. Everything else runs automatically based on hooks, schedules, and conversational triggers.
+Everything except `init` and `doctor` runs automatically based on hooks, schedules, and conversational triggers — the routing rules are injected by the `SessionStart` hook and fully specified in `secondbrain/references/session-start-bootstrap.md`.
 
 ---
 

@@ -2,6 +2,8 @@
 
 Contributions welcome. The plugin is built around an opinionated philosophy (see [ARCHITECTURE.md](ARCHITECTURE.md)) — major direction changes need to be discussed first, but bug fixes, new skills, documentation improvements, and Cowork-specific compatibility patches are always appreciated.
 
+> **Shipped vs. repo-root docs.** The files in the repository root (`README.md`, `ARCHITECTURE.md`, `SYNC.md`, `CONTRIBUTING.md`) are for GitHub visitors and contributors — they are **not shipped** with the plugin. Only the `secondbrain/` subdirectory is packaged and installed in user environments. The source of truth for user-facing agent behavior is the skill files under `secondbrain/skills/` and the references under `secondbrain/references/`. If you change user-facing behavior, update those first; only touch the repo-root docs if they describe something that's actually drifted.
+
 ---
 
 ## Getting set up
@@ -12,7 +14,7 @@ cd secondbrain
 python3 secondbrain/scripts/install_git_hooks.py
 ```
 
-The plugin is Markdown skill files + Python scripts in `scripts/`. There's no build step.
+The plugin is Markdown skill files (under `secondbrain/skills/`) plus Python scripts (under `secondbrain/scripts/`). There's no build step.
 
 **`install_git_hooks.py` is required after cloning.** It wires `core.hooksPath = .githooks`, which installs the tracked `.githooks/pre-push` hook. That hook refuses to let you push a broken plugin — it runs the full test suite, checks version consistency across `plugin.json` / `marketplace.json` (both `metadata.version` and `plugins[].version`), verifies all hook command scripts are resolvable and executable, verifies no orphan scripts, and refuses pushes whose version is not strictly greater than the last git tag. The hook NEVER amends commits during push — if something is wrong, you fix it and push again.
 
@@ -22,11 +24,11 @@ The plugin is Markdown skill files + Python scripts in `scripts/`. There's no bu
 python3 -m pytest tests/ -v
 ```
 
-208 tests, zero external dependencies beyond pytest. Tests are fully self-contained — they create temporary vaults, never touch real filesystems or shell configs, and clean up automatically.
+374 tests, zero external dependencies beyond pytest. Tests live at the repo root under `tests/` and are fully self-contained — they create temporary vaults, never touch real filesystems or shell configs, and clean up automatically.
 
 ### Testing changes locally
 
-1. Create a fresh test vault: `python3 scripts/init_obsidian.py --vault-path ~/test-vault --skip-install --dry-run`
+1. Create a fresh test vault: `python3 secondbrain/scripts/init_obsidian.py --vault-path ~/test-vault --skip-install --dry-run`
 2. Point a fresh Claude Code session at your local clone (symlink into `~/.claude/plugins/cache/secondbrain/<version>/`)
 3. Run `/secondbrain:init --verify` against the test vault
 
@@ -49,8 +51,8 @@ Looking for first issues? These are good entry points:
 1. Fork the repo on GitHub
 2. Create a branch: `git checkout -b fix/short-description`
 3. Make your change
-4. **Run the test suite:** `python3 -m pytest tests/ -v` — all 208 tests must pass
-5. If you changed scripts, also test against a real vault: `python3 scripts/verify_vault.py ~/your-vault`
+4. **Run the test suite:** `python3 -m pytest tests/ -v` — all 374 tests must pass
+5. If you changed scripts, also test against a real vault: `python3 secondbrain/scripts/verify_vault.py ~/your-vault`
 6. Commit with a clear message — see "Commit messages" below
 7. Push and open a PR against `main`
 
@@ -91,7 +93,7 @@ If you're modifying a scheduled task or the `init` skill's scheduled-task instal
 
 - **Don't** add features that require new mandatory dependencies. Obsidian, Dataview, and Connect MCP are already a lot. New required deps will be rejected.
 - **Don't** break backward compatibility without a major version bump and a clear migration path
-- **Don't** put hardcoded paths or personal references in any skill or template — Phase 1 of the v2.5.0 work was a big audit of these
+- **Don't** put hardcoded paths or personal references in any skill or template — the v2.5.0 work was a big audit of these and regressions get caught in `tests/test_skill_consistency.py`
 - **Don't** add telemetry or any kind of remote calls. The plugin runs entirely on the user's machine — that's a hard line
 - **Don't** disable `.gitignore` exclusions unless you have a good reason (`.mcp.json` is the one exception we made because it ships as part of the plugin's MCP config)
 
@@ -100,7 +102,7 @@ If you're modifying a scheduled task or the `init` skill's scheduled-task instal
 ## Code style
 
 - Markdown is the primary language. Keep skill files consistent with the existing style — frontmatter at the top, ## sections, code blocks with language tags
-- Python (just `verify-vault.py`): Python 3.8+, no external dependencies
+- Python (the `secondbrain/scripts/` suite): Python 3.8+, no external dependencies. Type-checked with Pyright in strict-ish mode
 - Shell commands in skills should use POSIX-compatible syntax where possible
 
 ---

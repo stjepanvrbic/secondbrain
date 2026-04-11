@@ -45,7 +45,7 @@ About 5 minutes. Works on macOS, Linux, and Windows.
 
 ## Quick start — Claude Cowork
 
-1. Download [`secondbrain-v3.0.0.zip`](https://github.com/stjepanvrbic/secondbrain/releases/latest) from the GitHub Releases page
+1. Download the latest `secondbrain-vX.Y.Z.zip` from the [GitHub Releases page](https://github.com/stjepanvrbic/secondbrain/releases/latest)
 2. Open Claude Desktop, switch to the **Cowork** tab
 3. Click **Customize** → **Browse plugins** → **Upload** → select the ZIP
 4. Click **Install** → **Authorize**
@@ -118,7 +118,7 @@ Scheduled tasks only run when Claude Desktop / Code is open and your computer is
 
 ## Scripts and programmatic enforcement
 
-v3.0 introduces a **script-first architecture**: deterministic tasks are handled by Python scripts, not agent prompts. This makes operations faster, more reliable, and enforceable via hooks.
+v3 introduces a **script-first architecture**: deterministic tasks are handled by Python scripts, not agent prompts. This makes operations faster, more reliable, and enforceable via hooks.
 
 | Script | Purpose |
 |--------|---------|
@@ -131,7 +131,7 @@ v3.0 introduces a **script-first architecture**: deterministic tasks are handled
 
 **Hook enforcement:** A `PostToolUse` hook (`hooks/validate-after-write.sh`) runs `verify_vault.py` after every vault write operation. If the script finds integrity errors, it blocks the agent with exit code 2 and forces it to fix the issues before continuing. The agent cannot skip validation.
 
-**Testing:** 208 tests across 7 test files (pytest, zero external dependencies). All scripts tested on macOS, Windows, and Linux.
+**Testing:** 374 tests across the `tests/` suite (pytest, zero external dependencies). All scripts tested on macOS, Windows, and Linux.
 
 ---
 
@@ -139,8 +139,8 @@ v3.0 introduces a **script-first architecture**: deterministic tasks are handled
 
 The system has three layers (full details in [ARCHITECTURE.md](ARCHITECTURE.md)):
 
-1. **Schema** (`CLAUDE.md`, `glossary.md`) — static configuration, the agent's personality and routing rules
-2. **Wiki** (`brain/`, `entities/`, `me/`, `log.md`, `_MANIFEST.md`) — the agent-maintained memory layer
+1. **Schema** (plugin-injected routing rules + `me/profile.md` + `glossary.md`) — static configuration and the agent's personality. The plugin ships its own routing rules and injects them at every session start via the `SessionStart` hook; `me/profile.md` in your vault holds your bio, rhythms, and preferences (user-edited, seeded by `/secondbrain:init`).
+2. **Wiki** (`brain/`, `entities/`, `log.md`, `_MANIFEST.md`) — the agent-maintained memory layer
 3. **Raw Sources** (`inbox/`, optional `sources/`) — unprocessed input the agent ingests
 
 The agent never modifies the Schema layer (you do). The agent maintains the Wiki layer (you don't directly edit it — you brain-dump into the inbox and the agent routes everything). Two navigation files at the vault root: `_MANIFEST.md` (index + content catalog) and `log.md` (Karpathy-style append-only chronological audit trail).
@@ -200,7 +200,7 @@ Cowork doesn't support direct GitHub install for individual users — only organ
 
 ### "Something is broken and I don't know what"
 
-Run `/secondbrain:doctor` — it runs 14 read-only checks and tells you exactly what's failing and how to fix each one.
+Run `/secondbrain:doctor` — it runs a 13-point read-only diagnostic and tells you exactly what's failing and how to fix each one.
 
 ### "I want to start over"
 
