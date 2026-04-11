@@ -27,18 +27,6 @@ def _matchers(event: str) -> list[str]:
     return [entry["matcher"] for entry in data["hooks"].get(event, [])]
 
 
-def _commands_for_matcher(event: str, matcher: str) -> list[str]:
-    data = _load()
-    out: list[str] = []
-    for entry in data["hooks"].get(event, []):
-        if entry.get("matcher") == matcher:
-            for hook in entry.get("hooks", []):
-                cmd = hook.get("command", "")
-                if cmd:
-                    out.append(cmd)
-    return out
-
-
 # ---------------------------------------------------------------------------
 # Top-level shape
 # ---------------------------------------------------------------------------
