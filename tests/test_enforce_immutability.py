@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-HOOK = Path(__file__).resolve().parent.parent / "hooks" / "enforce-immutability.sh"
+HOOK = Path(__file__).resolve().parent.parent / "secondbrain" / "hooks" / "enforce-immutability.sh"
 
 
 def run_hook(tool_name: str, path: str) -> tuple[int, str, str]:

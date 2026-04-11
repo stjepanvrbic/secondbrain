@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
 from rebuild_manifest import (
     collect_md_files,

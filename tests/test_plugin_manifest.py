@@ -24,8 +24,8 @@ from typing import Iterable
 
 import pytest
 
-PLUGIN_ROOT = Path(__file__).resolve().parent.parent   # secondbrain/
-REPO_ROOT = PLUGIN_ROOT.parent                          # repo root with .claude-plugin/marketplace.json
+REPO_ROOT = Path(__file__).resolve().parent.parent      # repo root with .claude-plugin/marketplace.json
+PLUGIN_ROOT = REPO_ROOT / "secondbrain"                  # shipped plugin source tree
 
 MARKETPLACE_JSON = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 PLUGIN_JSON = PLUGIN_ROOT / ".claude-plugin" / "plugin.json"
@@ -35,17 +35,23 @@ HOOKS_DIR = PLUGIN_ROOT / "hooks"
 
 # Scripts that aren't invoked by hooks or skills but are legitimate CLI/dev tools.
 # Everything else in scripts/ MUST be referenced somewhere or it's dead code.
+#
+# NOTE: `all_script_references()` only walks markdown inside PLUGIN_ROOT
+# (secondbrain/). Since Theme 6, README/ARCHITECTURE/SYNC/CONTRIBUTING live at
+# the repo root, so any script that is *only* documented from those files must
+# be listed here explicitly.
 CLI_ENTRYPOINT_ALLOWLIST = {
-    "bump_version.py",   # dev-only: used by pre-push hook and CI
+    "bump_version.py",         # dev-only: used by pre-push hook and CI
+    "install_git_hooks.py",    # dev-only: documented in repo-root CONTRIBUTING.md
 }
 
 # Dirs the installer SHIPS to users. Nothing under here may contain dev cruft.
 SHIPPED_DIRS = [PLUGIN_ROOT]
 
 # Paths inside shipped dirs that are allowed to exist despite being "dev-only".
-SHIP_EXCEPTIONS = {
-    "tests",                # pytest tests are in tests/ and shipping them is fine
-}
+# Since Theme 6 moved tests/ out of secondbrain/, this is currently empty —
+# retained as an extension point for iter_shipped_files().
+SHIP_EXCEPTIONS: set[str] = set()
 
 
 # ----------------------------------------------------------------------

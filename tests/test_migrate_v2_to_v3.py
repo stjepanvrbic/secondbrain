@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
 from migrate_v2_to_v3 import move_to_inbox, migrate, main
 

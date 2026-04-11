@@ -10,7 +10,7 @@ import pytest
 
 # Allow imports from scripts/
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
 from verify_vault import (
     Issue, CheckResult,

@@ -4,7 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
-HOOK = Path(__file__).resolve().parent.parent / "hooks" / "enforce-immutability-bash.sh"
+HOOK = Path(__file__).resolve().parent.parent / "secondbrain" / "hooks" / "enforce-immutability-bash.sh"
 
 
 def run_hook(command: str) -> tuple[int, str, str]:

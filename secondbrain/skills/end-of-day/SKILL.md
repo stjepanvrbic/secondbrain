@@ -6,7 +6,7 @@ description: >
   Reviews the day's plan vs accomplishments, prompts for a brain dump, flushes
   state to vault, and commits. Scheduled task only.
 metadata:
-  version: "3.3.6"
+  version: "3.3.7"
 ---
 
 # Core Rule

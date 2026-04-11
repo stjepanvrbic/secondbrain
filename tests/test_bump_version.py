@@ -5,7 +5,7 @@ import textwrap
 from pathlib import Path
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
 from bump_version import (
     parse_version, bump_patch, set_version, get_all_versions,

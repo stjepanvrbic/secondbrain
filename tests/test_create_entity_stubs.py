@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
 from create_entity_stubs import main, kebab_to_display, extract_names_from_json
 

@@ -7,7 +7,7 @@ description: >
   unprocessed inbox files. Routes raw input to structured vault entries with
   mandatory wikilink enforcement.
 metadata:
-  version: "3.3.6"
+  version: "3.3.7"
 ---
 
 # Core Rule

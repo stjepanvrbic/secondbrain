@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
 from init_obsidian import (  # type: ignore[reportMissingImports]
     detect_platform, is_wsl, find_obsidian, find_existing_vaults,

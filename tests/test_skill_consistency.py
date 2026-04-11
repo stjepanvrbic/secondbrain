@@ -42,7 +42,7 @@ from typing import Iterable
 
 import pytest
 
-PLUGIN_ROOT = Path(__file__).resolve().parent.parent   # secondbrain/
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent / "secondbrain"   # shipped plugin source tree
 SKILLS_DIR = PLUGIN_ROOT / "skills"
 SCHEDULED_TASKS_DIR = PLUGIN_ROOT / "scheduled-tasks"
 REFERENCES_DIR = PLUGIN_ROOT / "references"

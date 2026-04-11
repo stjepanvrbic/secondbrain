@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
 from vault_guide import (
     count_files, count_entities_by_links, get_active_tasks,

@@ -26,7 +26,7 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 PLUGIN_ROOT="$REPO_ROOT/secondbrain"
 BUMP_SCRIPT="$PLUGIN_ROOT/scripts/bump_version.py"
-TESTS_DIR="$PLUGIN_ROOT/tests"
+TESTS_DIR="$REPO_ROOT/tests"
 
 red()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 green() { printf '\033[32m%s\033[0m\n' "$*" >&2; }
