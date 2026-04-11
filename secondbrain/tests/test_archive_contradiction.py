@@ -6,10 +6,8 @@ import textwrap
 from datetime import datetime
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from archive_contradiction import extract_section, main, slugify  # noqa: E402
+from archive_contradiction import extract_section, main, slugify  # type: ignore[reportMissingImports]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +123,7 @@ class TestExtractSection:
 
 class TestHappyPath:
     def test_creates_archive_and_sidecar(
-        self, tmp_vault: Path, tmp_path: Path, capsys
+        self, tmp_vault: Path, tmp_path: Path
     ):
         original = write_original(tmp_vault, "note.md", "# Note\n\nOld fact.\n")
         new = write_new_content(tmp_path, "New fact replaces old.\n")
