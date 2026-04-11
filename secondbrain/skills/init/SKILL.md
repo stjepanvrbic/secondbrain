@@ -686,18 +686,66 @@ For "Skip": note in the final report that sync is not configured.
 
 ---
 
-# Step 9 — Setup Complete
+# Step 9 — Write install marker
 
-Print the final summary:
+Write the install marker to `${VAULT_PATH}/.secondbrain-installed` with results JSON. `init_obsidian.py` does this automatically when Step 4 runs; if you got here via a custom path, confirm the marker is present and regenerate it via `init_obsidian.py --vault-path "${VAULT_PATH}" --skip-install` if missing.
+
+Do NOT print the "Setup complete!" summary yet — Step 10 runs doctor first and gates the final success message on doctor reporting a clean state.
+
+---
+
+# Step 10 — Final verification via doctor
+
+**This step is NOT optional. Init is only "done" when doctor reports a clean vault. Without this gate, init can regress to claiming success while the vault is still unhealthy.**
+
+## 10a. Run doctor diagnose
+
+Invoke doctor in diagnose mode to confirm the install is healthy:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --diagnose --vault "${VAULT_PATH}"
+```
+
+Capture stdout. Parse the summary line (`Result: X passed, Y failed, Z warning, W skipped.`).
+
+## 10b. Branch on diagnose result
+
+**If all checks pass (Y == 0):** proceed to 10d and print the success summary.
+
+**If diagnose reports any failures (Y > 0):** proceed to 10c to treat them.
+
+## 10c. Run doctor in treat mode
+
+Invoke doctor in treatment mode to auto-fix what it can:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --treat --vault "${VAULT_PATH}" --interactive
+```
+
+`--interactive` lets treatment functions like `setup_profile` prompt the user where needed (profile seeding asks a few questions when the template still has `{{placeholder}}` tokens).
+
+After treatment finishes, re-run diagnose to verify:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --diagnose --vault "${VAULT_PATH}"
+```
+
+**If the re-diagnose is clean:** proceed to 10d.
+
+**If there are still failures:** list each remaining failure with the escalation instruction from doctor's output. Do NOT print "Setup complete!" — tell the user exactly what manual step is needed. Offer to re-run init, or point them at `/secondbrain:doctor` for a standalone treatment turn.
+
+## 10d. Print the Setup Complete summary (only if doctor reports clean)
+
+**Gate:** only print this block if doctor reports clean (zero non-skip failures). If any failure remains after 10c, fall through to 10e instead.
 
 ```
-Setup Complete!
+Setup complete! Your secondbrain is healthy.
 
 Environment: Claude Code
 Vault: ~/vault/ (N files, N entities, N active tasks)
 Profile: seeded / already populated
 Scheduled tasks: N installed / skipped (managed elsewhere)
-Vault health: 0 errors
+Vault health: 0 errors (doctor clean)
 Sync: configured / not configured
 
 You're ready. Try:
@@ -708,7 +756,22 @@ You're ready. Try:
   "/secondbrain:init --verify"  → re-verify
 ```
 
-Write the install marker to `${VAULT_PATH}/.secondbrain-installed` with results JSON.
+## 10e. Failure path — remaining issues
+
+If doctor still reports failures after treatment, print:
+
+```
+Setup is NOT complete. Doctor reports N remaining issue(s):
+
+  - <check name>: <failure message>
+    → Manual fix: <escalation instruction from doctor output>
+  ...
+
+Run /secondbrain:doctor after addressing each issue, or re-run
+/secondbrain:init once you've fixed the blockers.
+```
+
+**Never** print "Setup complete!" when doctor reports any non-skip failure. This is the hard gate — the Phase 1 "init leaves vault in verified state" loop is only closed when doctor is clean.
 
 ---
 
@@ -760,7 +823,7 @@ Every step in the full setup flow must check current state before acting:
 - Step 4 never overwrites existing files
 - Step 5 uses `CronList` to detect already-installed tasks and skips them
 - Step 6 only re-prompts if `me/profile.md` still has placeholder content
-- Steps 7-9 are inherently idempotent (verification + dream-protocol)
+- Steps 7-10 are inherently idempotent (verification + dream-protocol + doctor)
 
 Re-running `/secondbrain:init` after a clean install should print: `Everything looks good. Run /secondbrain:init --verify for a detailed health check.`
 
@@ -781,10 +844,11 @@ Every step has fallback behavior:
 - **Never** delete anything
 - **Never** silently fail — every error must be reported with a fix
 - **Never** assume the user has CLI knowledge (no `cd`, no `vim`, no shell tricks beyond `source ~/.zshrc`)
+- **Never claim setup is complete when doctor reports any non-skip failure.** Step 10 is the hard gate — the "Setup complete!" message may only be printed after `doctor_cli.py --diagnose` reports zero failures. If treatment (10c) leaves any failure unresolved, fall through to 10e and list the remaining issues. Do not print the success summary as a "close enough" approximation.
 
 # Implementation Notes
 
-- The 10-step flow is sequential — don't parallelize. The user's mental model is "I'm being walked through setup," which requires one thing at a time.
+- The step flow (Steps 0-10) is sequential — don't parallelize. The user's mental model is "I'm being walked through setup," which requires one thing at a time.
 - Wait for explicit user confirmation between steps. Don't barrel through without acknowledgment.
 - When asking the user to do something in Obsidian's UI, describe the click path with as much detail as possible (corner of screen, button label, etc.) — assume they've never used Obsidian before.
 - All `cron` strings are 5-field standard cron (`M H DoM Mon DoW`), as `CronCreate` expects.

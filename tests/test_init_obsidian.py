@@ -480,3 +480,93 @@ class TestMain:
              patch("init_obsidian.default_vault_path", return_value=tmp_path / "auto-vault"):
             code = main(["--skip-install", "--dry-run"])
             assert code == 0
+
+
+# ---------------------------------------------------------------------------
+# T6: delegation to setup_steps — env var writing
+# ---------------------------------------------------------------------------
+
+class TestMainDelegatesEnvVarsToSetupSteps:
+    """Step 7 of main() must delegate env var writing to
+    ``setup_steps.setup_env_vars`` instead of calling the inline
+    ``set_env_vars`` helper directly. The inline helper stays around
+    because setup_steps wraps it, but main() routes through setup_steps
+    so doctor and init share exactly one code path for this write.
+    """
+
+    def test_main_calls_setup_steps_setup_env_vars(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Step 7 in main() must call setup_steps.setup_env_vars when the
+        MCP plugin hands back a port. We patch setup_steps.setup_env_vars
+        and verify it receives (api_key, port, ...) — NOT (port, api_key,
+        shell, dry_run) which is the inline signature.
+        """
+        import setup_steps  # type: ignore[reportMissingImports]
+
+        vault = tmp_path / "test-vault"
+        fake_rc = tmp_path / ".zshrc"
+        fake_rc.write_text("")
+        monkeypatch.setenv(
+            "SECONDBRAIN_VAULTS_CONFIG",
+            str(tmp_path / "config" / "vaults.json"),
+        )
+
+        # Force configure_mcp_plugin to return a fixed (port, api_key) so
+        # the delegation branch fires with concrete values we can assert on.
+        with patch(
+            "init_obsidian.configure_mcp_plugin",
+            return_value=(27124, "fake-api-key"),
+        ), patch.object(
+            setup_steps,
+            "setup_env_vars",
+            wraps=setup_steps.setup_env_vars,
+        ) as spy, patch.dict(
+            "init_obsidian.SHELL_CONFIGS", {"zsh": fake_rc}
+        ):
+            code = main(["--vault-path", str(vault), "--skip-install"])
+
+        assert code == 0
+        # The delegation must have fired at least once.
+        assert spy.call_count >= 1, (
+            "init_obsidian.main() must delegate env var writing to "
+            "setup_steps.setup_env_vars instead of calling the inline helper."
+        )
+        # Verify the call signature matches setup_steps contract:
+        # setup_env_vars(api_key, port, ...).
+        call_args = spy.call_args_list[0]
+        # Accept either positional or keyword form.
+        passed_port = call_args.kwargs.get("port")
+        passed_key = call_args.kwargs.get("api_key")
+        if passed_port is None and len(call_args.args) >= 2:
+            passed_key = call_args.args[0]
+            passed_port = call_args.args[1]
+        assert passed_port == 27124
+        assert passed_key == "fake-api-key"
+
+    def test_setup_env_vars_writes_file_via_delegation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """End-to-end: when main() delegates to setup_steps.setup_env_vars,
+        the shell config file gets the env var lines written. This proves
+        the delegation doesn't break the observable behavior.
+        """
+        vault = tmp_path / "e2e-vault"
+        fake_rc = tmp_path / ".zshrc"
+        fake_rc.write_text("# pre-existing\n")
+        monkeypatch.setenv(
+            "SECONDBRAIN_VAULTS_CONFIG",
+            str(tmp_path / "config" / "vaults.json"),
+        )
+        monkeypatch.setenv("SHELL", "/bin/zsh")
+
+        with patch(
+            "init_obsidian.configure_mcp_plugin",
+            return_value=(27124, "e2e-api-key"),
+        ), patch.dict("init_obsidian.SHELL_CONFIGS", {"zsh": fake_rc}):
+            code = main(["--vault-path", str(vault), "--skip-install"])
+
+        assert code == 0
+        content = fake_rc.read_text()
+        assert 'OBSIDIAN_MCP_PORT="27124"' in content
+        assert 'OBSIDIAN_API_KEY="e2e-api-key"' in content

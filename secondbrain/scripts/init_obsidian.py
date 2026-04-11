@@ -1018,8 +1018,30 @@ def main(argv: Optional[List[str]] = None) -> int:
     shell = detect_shell()
     print(f"  Shell: {shell}")
     if port:
-        set_env_vars(port, api_key, shell, dry_run)
-        results["steps"].append(f"env vars: port={port}")
+        # T6: delegate env var writing to setup_steps.setup_env_vars so
+        # init and doctor share exactly one code path for this write.
+        # The inline set_env_vars() / _set_env_vars_powershell() helpers
+        # stay around because setup_steps ultimately calls back into them;
+        # this branch just routes the main() flow through the shared wrapper.
+        try:
+            import setup_steps  # type: ignore[reportMissingImports]
+        except ImportError as exc:
+            print(f"  Note: setup_steps not importable ({exc}); "
+                  "falling back to inline set_env_vars")
+            set_env_vars(port, api_key, shell, dry_run)
+            results["steps"].append(f"env vars: port={port}")
+        else:
+            env_result = setup_steps.setup_env_vars(
+                api_key=api_key, port=port, dry_run=dry_run,
+            )
+            if env_result.success:
+                print(f"  {env_result.message}")
+                results["steps"].append(f"env vars: port={port}")
+            else:
+                print(f"  {env_result.message}")
+                results["errors"].append(
+                    f"env vars: {env_result.error or env_result.message}"
+                )
     else:
         results["errors"].append("mcp plugin: no config")
 
