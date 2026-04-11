@@ -8,7 +8,7 @@ from unittest.mock import patch
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
-from vault_guide import (
+from vault_guide import (  # type: ignore[reportMissingImports]
     count_files, count_entities_by_links, get_active_tasks,
     get_upcoming_deadlines, count_inbox, get_last_dream_run,
     generate_guide, format_human, main,
@@ -81,7 +81,7 @@ class TestGetUpcomingDeadlines:
 
 class TestCountInbox:
     def test_empty_inbox(self, tmp_vault: Path):
-        total, unprocessed = count_inbox(tmp_vault)
+        total, _unprocessed = count_inbox(tmp_vault)
         assert total == 0
 
     def test_with_files(self, populated_vault: Path):
@@ -160,6 +160,6 @@ class TestCLI:
         data = json.loads(capsys.readouterr().out)
         assert "total_files" in data
 
-    def test_nonexistent_vault(self, capsys):
+    def test_nonexistent_vault(self):
         code = main(["/nonexistent/path"])
         assert code == 1

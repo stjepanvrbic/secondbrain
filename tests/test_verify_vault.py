@@ -1,18 +1,14 @@
 """Tests for verify_vault.py — every checker, CLI flag, and edge case."""
 
 import json
-import os
 import textwrap
-import time
 from pathlib import Path
-
-import pytest
 
 # Allow imports from scripts/
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
-from verify_vault import (
+from verify_vault import (  # type: ignore[reportMissingImports]
     Issue, CheckResult,
     VaultIndex, TextProcessor, parse_wikilink, resolve_wikilink,
     BrokenWikilinkChecker, MetadataValidator, DuplicateHeadingChecker,
@@ -498,7 +494,7 @@ class TestReporter:
         assert output["summary"]["errors"] == 1
         assert code == 1
 
-    def test_clean_exit_code(self, capsys):
+    def test_clean_exit_code(self):
         results = [CheckResult("test", [], {"count": 0})]
         code = Reporter(use_json=True).report(results)
         assert code == 0
@@ -533,7 +529,7 @@ class TestCLI:
         assert code == 1
         assert "unknown" in capsys.readouterr().err.lower()
 
-    def test_nonexistent_vault(self, capsys):
+    def test_nonexistent_vault(self):
         code = main(["/nonexistent/path"])
         assert code == 1
 

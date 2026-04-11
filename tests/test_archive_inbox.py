@@ -1,15 +1,12 @@
 """Tests for archive_inbox.py — move processed inbox files to archive."""
 
 import os
-import textwrap
 import time
 from pathlib import Path
 
-import pytest
-
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
-from archive_inbox import main
+from archive_inbox import main  # type: ignore[reportMissingImports]
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +120,7 @@ class TestEdgeCases:
         code = main([str(tmp_vault)])
         assert code == 0
 
-    def test_nonexistent_vault(self, capsys):
+    def test_nonexistent_vault(self):
         code = main(["/nonexistent/vault/path"])
         assert code == 1
 

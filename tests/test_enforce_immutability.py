@@ -4,8 +4,6 @@ import json
 import subprocess
 from pathlib import Path
 
-import pytest
-
 HOOK = Path(__file__).resolve().parent.parent / "secondbrain" / "hooks" / "enforce-immutability.sh"
 
 
@@ -91,7 +89,7 @@ class TestBlocksInbox:
         assert "BLOCKED" in stderr
 
     def test_delete_in_inbox(self):
-        code, _, stderr = run_hook("mcp__obsidian__vault_delete", "inbox/old.md")
+        code, _, _ = run_hook("mcp__obsidian__vault_delete", "inbox/old.md")
         assert code == 2
 
     def test_nested_inbox_path(self):

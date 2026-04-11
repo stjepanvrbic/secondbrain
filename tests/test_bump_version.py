@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
-from bump_version import (
+from bump_version import (  # type: ignore[reportMissingImports]
     parse_version, bump_patch, set_version, get_all_versions,
     check_consistency, read_current_version, main,
 )
@@ -49,7 +49,7 @@ class TestReadCurrentVersion:
     def test_reads_from_plugin_json(self):
         v = read_current_version()
         assert v.count(".") == 2
-        major, minor, patch = parse_version(v)
+        major, _minor, _patch = parse_version(v)
         assert major >= 3
 
 
@@ -83,7 +83,7 @@ class TestSetVersion:
             """))
 
         # Patch the module-level paths
-        import bump_version
+        import bump_version  # type: ignore[reportMissingImports]
         orig_root = bump_version.REPO_ROOT
         orig_files = bump_version.VERSION_FILES
         orig_skills = bump_version.SKILLS_DIR
@@ -130,7 +130,7 @@ class TestSetVersion:
             "plugins": [{"name": "test", "version": "2.0.0", "source": "./"}]
         }))
 
-        import bump_version
+        import bump_version  # type: ignore[reportMissingImports]
         orig_files = bump_version.VERSION_FILES
         orig_skills = bump_version.SKILLS_DIR
 
@@ -155,7 +155,7 @@ class TestMain:
         code = main(["--check"])
         assert code == 0
 
-    def test_explicit_version(self, tmp_path: Path, capsys):
+    def test_explicit_version(self, tmp_path: Path):
         """Test setting explicit version via CLI."""
         plugin_dir = tmp_path / ".claude-plugin"
         plugin_dir.mkdir()
@@ -169,7 +169,7 @@ class TestMain:
             "plugins": [{"name": "test", "version": "1.0.0", "source": "./"}]
         }))
 
-        import bump_version
+        import bump_version  # type: ignore[reportMissingImports]
         orig_root = bump_version.REPO_ROOT
         orig_files = bump_version.VERSION_FILES
         orig_skills = bump_version.SKILLS_DIR

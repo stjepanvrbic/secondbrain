@@ -4,12 +4,10 @@ import textwrap
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import pytest
-
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
-from rebuild_manifest import (
+from rebuild_manifest import (  # type: ignore[reportMissingImports]
     collect_md_files,
     count_per_directory,
     list_entities,

@@ -1,15 +1,12 @@
 """Tests for create_entity_stubs.py."""
 
 import json
-import textwrap
 from pathlib import Path
-
-import pytest
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
-from create_entity_stubs import main, kebab_to_display, extract_names_from_json
+from create_entity_stubs import main, kebab_to_display, extract_names_from_json  # type: ignore[reportMissingImports]
 
 
 # ---------------------------------------------------------------------------
