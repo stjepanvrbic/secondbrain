@@ -31,7 +31,10 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
+
+if TYPE_CHECKING:
+    from setup_steps import StepResult  # type: ignore[reportMissingImports]
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +103,7 @@ def _step_result(
     message: str,
     did_work: bool,
     error: Optional[str] = None,
-):
+) -> "StepResult":
     """Return a StepResult, importing it lazily to avoid a hard dep on
     setup_steps at module load time.
 
@@ -108,8 +111,8 @@ def _step_result(
     in a decent chunk of the plugin surface, and we want `vault_git` to be
     importable from a bare script runner without dragging all that along.
     """
-    from setup_steps import StepResult  # type: ignore[reportMissingImports]
-    return StepResult(
+    from setup_steps import StepResult as _StepResult  # type: ignore[reportMissingImports]  # noqa: PLC0415
+    return _StepResult(
         success=success,
         message=message,
         did_work=did_work,
@@ -152,52 +155,52 @@ def _run_git(
     )
 
 
-def _ensure_vault_exists(vault_path: Path):
-    """Return (ok, StepResult). On failure, caller should return the StepResult."""
+def _ensure_vault_exists(vault_path: Path) -> Optional["StepResult"]:
+    """Return None on success, or a failure StepResult the caller should return."""
     if not vault_path.exists():
-        return False, _step_result(
+        return _step_result(
             success=False,
             message="vault path does not exist",
             did_work=False,
             error=f"vault path does not exist: {vault_path}",
         )
     if not vault_path.is_dir():
-        return False, _step_result(
+        return _step_result(
             success=False,
             message="vault path is not a directory",
             did_work=False,
             error=f"vault path is not a directory: {vault_path}",
         )
-    return True, None
+    return None
 
 
-def _ensure_git_available():
-    """Return (ok, StepResult). On failure, caller should return the StepResult."""
+def _ensure_git_available() -> Optional["StepResult"]:
+    """Return None on success, or a failure StepResult the caller should return."""
     if not _git_available():
-        return False, _step_result(
+        return _step_result(
             success=False,
             message="git not installed",
             did_work=False,
             error="git binary not found on PATH",
         )
-    return True, None
+    return None
 
 
-def _require_repo(vault_path: Path):
-    """Return (ok, StepResult). On failure, caller should return the StepResult.
+def _require_repo(vault_path: Path) -> Optional["StepResult"]:
+    """Return None on success, or a failure StepResult the caller should return.
 
     Used by functions that mutate an existing repo (commit_changes,
     reset_last_commit, ...). Reports a uniform error when the caller hasn't
     yet run `vault_git.py init`.
     """
     if not is_git_repo(vault_path):
-        return False, _step_result(
+        return _step_result(
             success=False,
             message="not a git repo; run vault_git.py init first",
             did_work=False,
             error=f"not a git repository: {vault_path}",
         )
-    return True, None
+    return None
 
 
 def _count_commits(vault_path: Path) -> int:
@@ -242,7 +245,7 @@ def init_repo(
     with_remote: bool = False,
     remote_url: Optional[str] = None,
     dry_run: bool = False,
-):
+) -> "StepResult":
     """Run `git init` in `vault_path` and optionally add a remote.
 
     Idempotent: if the path is already a git repo, `did_work` is False and no
@@ -253,11 +256,11 @@ def init_repo(
     Does NOT make an initial commit — that's `initial_commit()`'s job so the
     two steps stay separable for dry-run and doctor treatment flows.
     """
-    ok, err = _ensure_git_available()
-    if not ok:
+    err = _ensure_git_available()
+    if err is not None:
         return err
-    ok, err = _ensure_vault_exists(vault_path)
-    if not ok:
+    err = _ensure_vault_exists(vault_path)
+    if err is not None:
         return err
 
     already_repo = is_git_repo(vault_path)
@@ -326,7 +329,7 @@ def init_repo(
     )
 
 
-def write_gitignore(vault_path: Path, dry_run: bool = False):
+def write_gitignore(vault_path: Path, dry_run: bool = False) -> "StepResult":
     """Write `DEFAULT_GITIGNORE` to `${vault_path}/.gitignore`.
 
     Idempotent: if the existing `.gitignore` already matches the default,
@@ -335,8 +338,8 @@ def write_gitignore(vault_path: Path, dry_run: bool = False):
     a known-good ignore list, and the user can re-apply any customizations
     on top afterward.
     """
-    ok, err = _ensure_vault_exists(vault_path)
-    if not ok:
+    err = _ensure_vault_exists(vault_path)
+    if err is not None:
         return err
 
     gitignore = vault_path / ".gitignore"
@@ -386,7 +389,7 @@ def initial_commit(
     *,
     author: str = DEFAULT_AUTHOR,
     dry_run: bool = False,
-):
+) -> "StepResult":
     """Make the first commit of the vault.
 
     Runs `git add -A` then `git commit` with the canonical secondbrain author
@@ -394,14 +397,14 @@ def initial_commit(
     `did_work=False` — this function is the "cold start" step, not a general
     commit helper. Use `commit_changes()` for everything after.
     """
-    ok, err = _ensure_git_available()
-    if not ok:
+    err = _ensure_git_available()
+    if err is not None:
         return err
-    ok, err = _ensure_vault_exists(vault_path)
-    if not ok:
+    err = _ensure_vault_exists(vault_path)
+    if err is not None:
         return err
-    ok, err = _require_repo(vault_path)
-    if not ok:
+    err = _require_repo(vault_path)
+    if err is not None:
         return err
 
     if _count_commits(vault_path) > 0:
@@ -485,7 +488,7 @@ def commit_changes(
     author: str = DEFAULT_AUTHOR,
     push: bool = False,
     dry_run: bool = False,
-):
+) -> "StepResult":
     """Stage all changes and commit with the given message.
 
     If there are no changes, returns `did_work=False` and `success=True` —
@@ -497,14 +500,14 @@ def commit_changes(
     leave the user's vault in a "broken" state just because a remote was
     unreachable. Doctor or the next turn can retry the push.
     """
-    ok, err = _ensure_git_available()
-    if not ok:
+    err = _ensure_git_available()
+    if err is not None:
         return err
-    ok, err = _ensure_vault_exists(vault_path)
-    if not ok:
+    err = _ensure_vault_exists(vault_path)
+    if err is not None:
         return err
-    ok, err = _require_repo(vault_path)
-    if not ok:
+    err = _require_repo(vault_path)
+    if err is not None:
         return err
 
     if not has_uncommitted_changes(vault_path):
@@ -618,7 +621,7 @@ def reset_last_commit(
     vault_path: Path,
     *,
     hard: bool = True,
-):
+) -> "StepResult":
     """Reset HEAD to HEAD~1 (hard by default).
 
     Used by the /secondbrain:undo-last-turn skill (T9). Fails if there's
@@ -627,14 +630,14 @@ def reset_last_commit(
     changes along with the commit; `hard=False` keeps the working tree so
     the user can re-commit after edits.
     """
-    ok, err = _ensure_git_available()
-    if not ok:
+    err = _ensure_git_available()
+    if err is not None:
         return err
-    ok, err = _ensure_vault_exists(vault_path)
-    if not ok:
+    err = _ensure_vault_exists(vault_path)
+    if err is not None:
         return err
-    ok, err = _require_repo(vault_path)
-    if not ok:
+    err = _require_repo(vault_path)
+    if err is not None:
         return err
 
     count = _count_commits(vault_path)
