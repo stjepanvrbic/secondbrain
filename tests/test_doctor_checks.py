@@ -13,18 +13,19 @@ MCP server is ever contacted (we use a factory parameter for test injection).
 from __future__ import annotations
 
 import json
-import os
 import sys
 import uuid
 from pathlib import Path
-from typing import Iterator, List, Optional
-from unittest.mock import MagicMock, patch
+from typing import Iterator
+from unittest.mock import MagicMock
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
-from doctor_checks import (  # type: ignore[reportMissingImports]
+import setup_steps  # pyright: ignore[reportMissingImports]  # noqa: E402
+
+from doctor_checks import (  # pyright: ignore[reportMissingImports]
     CheckResult,
     check_core_hooks_path,
     check_environment,
@@ -660,7 +661,7 @@ class TestRunFixableTreatments:
         broken_vault: Path,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        from setup_steps import StepResult  # type: ignore[reportMissingImports]  # noqa: PLC0415
+        step_result_cls = setup_steps.StepResult
 
         # Fake results — simulate log.md and vault_id both failing
         results = [
@@ -682,17 +683,16 @@ class TestRunFixableTreatments:
 
         called: list[str] = []
 
-        def fake_create_log_md(vault_path: Path) -> StepResult:
+        def fake_create_log_md(vault_path: Path):
             del vault_path
             called.append("create_log_md")
-            return StepResult(success=True, message="log.md created", did_work=True)
+            return step_result_cls(success=True, message="log.md created", did_work=True)
 
-        def fake_write_vault_id(vault_path: Path) -> StepResult:
+        def fake_write_vault_id(vault_path: Path):
             del vault_path
             called.append("write_vault_id")
-            return StepResult(success=True, message="vault_id=fake", did_work=True)
+            return step_result_cls(success=True, message="vault_id=fake", did_work=True)
 
-        import setup_steps  # type: ignore[reportMissingImports]
         monkeypatch.setattr(setup_steps, "write_vault_id", fake_write_vault_id, raising=True)
         # create_log_md doesn't exist yet — the implementation will add it.
         monkeypatch.setattr(setup_steps, "create_log_md", fake_create_log_md, raising=False)
