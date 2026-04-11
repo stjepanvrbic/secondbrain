@@ -13,6 +13,7 @@ config is never touched.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import sys
@@ -488,7 +489,7 @@ class TestImportHygiene:
         # Force re-import.
         if "setup_steps" in sys.modules:
             del sys.modules["setup_steps"]
-        import setup_steps as _fresh  # noqa: F401
+        importlib.import_module("setup_steps")
 
         assert not probe.exists()
         assert not probe.parent.exists()
