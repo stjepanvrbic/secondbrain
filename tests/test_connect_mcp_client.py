@@ -78,7 +78,8 @@ class FakeResponse:
     def __enter__(self) -> "FakeResponse":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        del exc_type, exc_val, exc_tb
         return None
 
 
@@ -539,74 +540,67 @@ class TestErrorMapping:
 
     def test_http_401_raises_auth_failed(self):
         # The init handshake itself gets back a 401.
-        def raise_401(req: Any, timeout: Optional[float] = None) -> None:
-            raise urllib.error.HTTPError(
-                url=req.full_url, code=401, msg="Unauthorized",
-                hdrs=None,  # type: ignore[arg-type]
-                fp=io.BytesIO(b'{"error": "Unauthorized"}'),
-            )
-        with patch("urllib.request.urlopen", side_effect=raise_401):
+        error = urllib.error.HTTPError(
+            url="http://localhost:27124/mcp", code=401, msg="Unauthorized",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=io.BytesIO(b'{"error": "Unauthorized"}'),
+        )
+        with patch("urllib.request.urlopen", side_effect=error):
             client = ConnectMCPClient()
             with pytest.raises(ConnectMCPAuthFailed):
                 client.vault_read("brain/status.md")
 
     def test_http_403_raises_auth_failed(self):
-        def raise_403(req: Any, timeout: Optional[float] = None) -> None:
-            raise urllib.error.HTTPError(
-                url=req.full_url, code=403, msg="Forbidden",
-                hdrs=None,  # type: ignore[arg-type]
-                fp=io.BytesIO(b'{"error": "Forbidden"}'),
-            )
-        with patch("urllib.request.urlopen", side_effect=raise_403):
+        error = urllib.error.HTTPError(
+            url="http://localhost:27124/mcp", code=403, msg="Forbidden",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=io.BytesIO(b'{"error": "Forbidden"}'),
+        )
+        with patch("urllib.request.urlopen", side_effect=error):
             client = ConnectMCPClient()
             with pytest.raises(ConnectMCPAuthFailed):
                 client.vault_read("brain/status.md")
 
     def test_http_404_raises_not_found(self):
-        def raise_404(req: Any, timeout: Optional[float] = None) -> None:
-            raise urllib.error.HTTPError(
-                url=req.full_url, code=404, msg="Not Found",
-                hdrs=None,  # type: ignore[arg-type]
-                fp=io.BytesIO(b'{"error": "Not Found"}'),
-            )
-        with patch("urllib.request.urlopen", side_effect=raise_404):
+        error = urllib.error.HTTPError(
+            url="http://localhost:27124/mcp", code=404, msg="Not Found",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=io.BytesIO(b'{"error": "Not Found"}'),
+        )
+        with patch("urllib.request.urlopen", side_effect=error):
             client = ConnectMCPClient()
             with pytest.raises(ConnectMCPNotFound):
                 client.vault_read("missing.md")
 
     def test_http_500_raises_request_failed(self):
-        def raise_500(req: Any, timeout: Optional[float] = None) -> None:
-            raise urllib.error.HTTPError(
-                url=req.full_url, code=500, msg="Server Error",
-                hdrs=None,  # type: ignore[arg-type]
-                fp=io.BytesIO(b'{"error": "oops"}'),
-            )
-        with patch("urllib.request.urlopen", side_effect=raise_500):
+        error = urllib.error.HTTPError(
+            url="http://localhost:27124/mcp", code=500, msg="Server Error",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=io.BytesIO(b'{"error": "oops"}'),
+        )
+        with patch("urllib.request.urlopen", side_effect=error):
             client = ConnectMCPClient()
             with pytest.raises(ConnectMCPRequestFailed):
                 client.vault_read("brain/status.md")
 
     def test_connection_refused_raises_unreachable(self):
-        def raise_refused(req: Any, timeout: Optional[float] = None) -> None:
-            raise urllib.error.URLError(ConnectionRefusedError("Connection refused"))
-        with patch("urllib.request.urlopen", side_effect=raise_refused):
+        error = urllib.error.URLError(ConnectionRefusedError("Connection refused"))
+        with patch("urllib.request.urlopen", side_effect=error):
             client = ConnectMCPClient()
             with pytest.raises(ConnectMCPUnreachable):
                 client.vault_read("brain/status.md")
 
     def test_timeout_raises_unreachable(self):
-        def raise_timeout(req: Any, timeout: Optional[float] = None) -> None:
-            raise urllib.error.URLError("timed out")
-        with patch("urllib.request.urlopen", side_effect=raise_timeout):
+        error = urllib.error.URLError("timed out")
+        with patch("urllib.request.urlopen", side_effect=error):
             client = ConnectMCPClient()
             with pytest.raises(ConnectMCPUnreachable):
                 client.vault_read("brain/status.md")
 
     def test_generic_oserror_raises_unreachable(self):
         """Socket-level OSError (e.g. DNS failure bubbled up) → unreachable."""
-        def raise_oserror(req: Any, timeout: Optional[float] = None) -> None:
-            raise OSError("network unreachable")
-        with patch("urllib.request.urlopen", side_effect=raise_oserror):
+        error = OSError("network unreachable")
+        with patch("urllib.request.urlopen", side_effect=error):
             client = ConnectMCPClient()
             with pytest.raises(ConnectMCPUnreachable):
                 client.vault_read("brain/status.md")
@@ -647,20 +641,18 @@ class TestIsReachable:
             assert client.is_reachable() is True
 
     def test_returns_false_on_connection_refused(self):
-        def raise_refused(req: Any, timeout: Optional[float] = None) -> None:
-            raise urllib.error.URLError(ConnectionRefusedError("refused"))
-        with patch("urllib.request.urlopen", side_effect=raise_refused):
+        error = urllib.error.URLError(ConnectionRefusedError("refused"))
+        with patch("urllib.request.urlopen", side_effect=error):
             client = ConnectMCPClient()
             assert client.is_reachable() is False
 
     def test_returns_false_on_auth_failed(self):
-        def raise_401(req: Any, timeout: Optional[float] = None) -> None:
-            raise urllib.error.HTTPError(
-                url=req.full_url, code=401, msg="Unauthorized",
-                hdrs=None,  # type: ignore[arg-type]
-                fp=io.BytesIO(b""),
-            )
-        with patch("urllib.request.urlopen", side_effect=raise_401):
+        error = urllib.error.HTTPError(
+            url="http://localhost:27124/mcp", code=401, msg="Unauthorized",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=io.BytesIO(b""),
+        )
+        with patch("urllib.request.urlopen", side_effect=error):
             client = ConnectMCPClient()
             assert client.is_reachable() is False
 
@@ -673,9 +665,8 @@ class TestIsReachable:
             assert client.is_reachable() is False
 
     def test_returns_false_on_unexpected_exception(self):
-        def raise_runtime(req: Any, timeout: Optional[float] = None) -> None:
-            raise RuntimeError("something weird")
-        with patch("urllib.request.urlopen", side_effect=raise_runtime):
+        error = RuntimeError("something weird")
+        with patch("urllib.request.urlopen", side_effect=error):
             client = ConnectMCPClient()
             # is_reachable() must never raise.
             assert client.is_reachable() is False

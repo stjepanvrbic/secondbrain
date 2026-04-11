@@ -492,7 +492,7 @@ class ConnectMCPClient:
             ) from exc
 
         payload = self._parse_response_body(raw)
-        return self._unwrap_jsonrpc(payload, request_id)
+        return self._unwrap_jsonrpc(payload)
 
     def _raise_for_http_error(self, exc: urllib.error.HTTPError) -> None:
         """Map an HTTPError to a typed exception and raise it."""
@@ -557,7 +557,7 @@ class ConnectMCPClient:
                 f"Could not parse Connect MCP response as JSON: {exc}"
             ) from exc
 
-    def _unwrap_jsonrpc(self, payload: Any, request_id: int) -> Any:
+    def _unwrap_jsonrpc(self, payload: Any) -> Any:
         """Validate a JSON-RPC envelope and return its `result` field.
 
         Maps MCP error codes to typed exceptions:
