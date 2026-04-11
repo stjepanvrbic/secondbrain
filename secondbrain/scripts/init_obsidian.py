@@ -290,7 +290,7 @@ def find_existing_vaults(plat: str) -> List[Tuple[str, Path]]:
         data = json.loads(obsidian_json.read_text(encoding="utf-8"))
         vaults = data.get("vaults", {})
         results = []
-        for _vault_id, info in vaults.items():
+        for info in vaults.values():
             vault_path = Path(info.get("path", ""))
             if vault_path.is_dir():
                 # Try to get vault name from path
@@ -682,7 +682,7 @@ def import_notes(vault_path: Path, source: Path, dry_run: bool = False) -> int:
     copied = 0
     skipped = 0
 
-    for dirpath, _dirnames, filenames in os.walk(source):
+    for dirpath, _, filenames in os.walk(source):
         for fname in filenames:
             src = Path(dirpath) / fname
             if src.suffix.lower() not in IMPORTABLE_SUFFIXES:
