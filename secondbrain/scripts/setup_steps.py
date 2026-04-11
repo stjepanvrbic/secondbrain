@@ -622,3 +622,211 @@ def list_vault_paths_for_hooks() -> List[str]:
     secondbrain" — which is correct.
     """
     return [entry.path for entry in list_configured_vaults()]
+
+
+# ---------------------------------------------------------------------------
+# Doctor treatment helpers
+#
+# These are thin wrappers around init_obsidian primitives, returning
+# StepResult so doctor's Phase 2 dispatcher can uniformly report outcomes.
+# Each function is idempotent and never mutates a vault that's already in
+# the desired state (`did_work=False`).
+# ---------------------------------------------------------------------------
+
+def create_log_md(vault_path: Path) -> StepResult:
+    """Ensure `${vault_path}/log.md` exists with the canonical header.
+
+    Idempotent — if the file is already present, returns `did_work=False`
+    without touching it. Used by doctor to fix a missing log.md without
+    having to re-run the whole init flow.
+    """
+    log_path = vault_path / "log.md"
+    if log_path.exists():
+        return StepResult(
+            success=True,
+            message=f"create_log_md: {log_path} already exists",
+            did_work=False,
+        )
+
+    today = datetime.now().date().isoformat()
+    header = (
+        "# Log\n\n"
+        f"## [{today} 00:00] doctor | log.md created by doctor treatment\n"
+        "Created by /secondbrain:doctor after detecting missing log.md.\n"
+    )
+    try:
+        vault_path.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(header)
+    except OSError as exc:
+        return StepResult(
+            success=False,
+            message="create_log_md: write failed",
+            did_work=False,
+            error=str(exc),
+        )
+
+    return StepResult(
+        success=True,
+        message=f"create_log_md: wrote {log_path}",
+        did_work=True,
+    )
+
+
+def setup_vault_scaffolding(vault_path: Path) -> StepResult:
+    """Create the required folder structure and critical files.
+
+    Delegates to `init_obsidian.scaffold_vault`. Returns `did_work=True`
+    iff any dirs or files were actually created. Safe to re-run on an
+    already-scaffolded vault (scaffold_vault never overwrites).
+    """
+    try:
+        import init_obsidian  # type: ignore[reportMissingImports]
+    except ImportError as exc:
+        return StepResult(
+            success=False,
+            message="setup_vault_scaffolding: init_obsidian not importable",
+            did_work=False,
+            error=str(exc),
+        )
+
+    try:
+        created = init_obsidian.scaffold_vault(vault_path, dry_run=False)
+    except OSError as exc:
+        return StepResult(
+            success=False,
+            message="setup_vault_scaffolding: scaffold failed",
+            did_work=False,
+            error=str(exc),
+        )
+
+    if created == 0:
+        return StepResult(
+            success=True,
+            message="setup_vault_scaffolding: already fully scaffolded",
+            did_work=False,
+        )
+
+    return StepResult(
+        success=True,
+        message=f"setup_vault_scaffolding: created {created} item(s)",
+        did_work=True,
+    )
+
+
+def rebuild_manifest(vault_path: Path) -> StepResult:
+    """Regenerate `${vault_path}/_MANIFEST.md` via rebuild_manifest.py.
+
+    Always runs (manifest rebuild is cheap and idempotent). Returns
+    `did_work=True` on success.
+    """
+    try:
+        import init_obsidian  # type: ignore[reportMissingImports]
+    except ImportError as exc:
+        return StepResult(
+            success=False,
+            message="rebuild_manifest: init_obsidian not importable",
+            did_work=False,
+            error=str(exc),
+        )
+
+    # init_obsidian.run_rebuild_manifest spawns the rebuild_manifest.py
+    # subprocess — keep the same implementation so there's exactly one
+    # manifest-rebuild code path in the plugin.
+    try:
+        ok = init_obsidian.run_rebuild_manifest(vault_path, dry_run=False)
+    except (OSError, RuntimeError) as exc:
+        return StepResult(
+            success=False,
+            message="rebuild_manifest: subprocess failed",
+            did_work=False,
+            error=str(exc),
+        )
+
+    if not ok:
+        return StepResult(
+            success=False,
+            message="rebuild_manifest: rebuild_manifest.py returned non-zero",
+            did_work=False,
+            error="rebuild_manifest.py failed — see stderr",
+        )
+
+    return StepResult(
+        success=True,
+        message="rebuild_manifest: _MANIFEST.md regenerated",
+        did_work=True,
+    )
+
+
+def setup_profile(vault_path: Path, interactive: bool = True) -> StepResult:
+    """Seed `me/profile.md` from the shipped template.
+
+    If the profile already has user content (no `{{PLACEHOLDER}}` tokens),
+    returns `did_work=False`. Otherwise writes the template (or an
+    interactive walkthrough in a future enhancement). For now, `interactive`
+    is accepted for API symmetry but the implementation only seeds the
+    template file — filling in placeholders happens in the init skill.
+    """
+    del interactive  # Accepted for API symmetry; unused in Phase 1.
+
+    profile = vault_path / "me" / "profile.md"
+    if profile.exists():
+        content = profile.read_text()
+        if "{{" not in content:
+            return StepResult(
+                success=True,
+                message=f"setup_profile: {profile} already has user content",
+                did_work=False,
+            )
+
+    try:
+        import init_obsidian  # type: ignore[reportMissingImports]
+    except ImportError as exc:
+        return StepResult(
+            success=False,
+            message="setup_profile: init_obsidian not importable",
+            did_work=False,
+            error=str(exc),
+        )
+
+    try:
+        profile.parent.mkdir(parents=True, exist_ok=True)
+        template_text = init_obsidian._load_profile_template()
+        profile.write_text(template_text)
+    except OSError as exc:
+        return StepResult(
+            success=False,
+            message="setup_profile: write failed",
+            did_work=False,
+            error=str(exc),
+        )
+
+    return StepResult(
+        success=True,
+        message=(
+            f"setup_profile: seeded {profile} from template — "
+            "fill in placeholders via /secondbrain:init"
+        ),
+        did_work=True,
+    )
+
+
+def setup_scheduled_tasks(vault_path: Path) -> StepResult:
+    """Placeholder for scheduled-task registration.
+
+    The real work is done by the init skill (which can call CronCreate or
+    emit `/schedule` commands depending on environment). Doctor can't
+    register tasks from a Python subprocess — this function exists so the
+    dispatcher has a target to invoke, and it returns a StepResult that
+    clearly tells the user to run init instead.
+    """
+    del vault_path  # No vault state is touched here.
+    return StepResult(
+        success=False,
+        message=(
+            "setup_scheduled_tasks: doctor cannot register scheduled tasks "
+            "from a subprocess. Run /secondbrain:init to install them "
+            "(Code uses CronCreate; Cowork emits /schedule commands)."
+        ),
+        did_work=False,
+        error="scheduled tasks must be registered by the init skill",
+    )
