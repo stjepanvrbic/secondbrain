@@ -12,7 +12,7 @@ and enforces:
 
 Scope:
     - `secondbrain/skills/**/SKILL.md`
-    - `secondbrain/scheduled-tasks/**/SKILL.md`
+    - `secondbrain/scheduled-tasks/**/*.md` (every markdown file, including MANIFEST.md)
     - `secondbrain/references/**/*` (every file)
 
 NON-scope (deliberately):
@@ -50,8 +50,12 @@ REFERENCES_DIR = PLUGIN_ROOT / "references"
 # Paths that have been retired and must NOT be referenced from plugin files.
 # Keep the list narrow and stable: adding a path is a lint rule that needs
 # its own mechanical cleanup first. Later themes in the plan will grow this.
+#
+# Entries must be specific enough that substring matching does not clobber
+# legitimate migration artifacts. E.g., a bare `brain/commitments` would also
+# fire on `brain/commitments-v2.md` (the archive target named in init/SKILL.md),
+# which is legitimate cleanup prose — not a forward reference to fix.
 DEPRECATED_PATHS: tuple[str, ...] = (
-    "brain/commitments",
     "brain/commitments.md",
 )
 
@@ -98,12 +102,16 @@ def iter_linted_files() -> Iterable[Path]:
         if rp not in seen:
             seen.add(rp)
 
-    # SKILL.md files under skills/ and scheduled-tasks/
-    for root in (SKILLS_DIR, SCHEDULED_TASKS_DIR):
-        if not root.is_dir():
-            continue
-        for skill_md in sorted(root.rglob("SKILL.md")):
+    # SKILL.md files under skills/
+    if SKILLS_DIR.is_dir():
+        for skill_md in sorted(SKILLS_DIR.rglob("SKILL.md")):
             _add(skill_md)
+
+    # Every markdown file under scheduled-tasks/ — picks up each task's
+    # SKILL.md AND the top-level MANIFEST.md that `/init` reads at setup.
+    if SCHEDULED_TASKS_DIR.is_dir():
+        for md in sorted(SCHEDULED_TASKS_DIR.rglob("*.md")):
+            _add(md)
 
     # Every file under references/ (markdown, templates, whatever)
     if REFERENCES_DIR.is_dir():
