@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -184,10 +184,8 @@ def parse_sections(content: str) -> Dict[str, str]:
     round-trip through parse → edit → assemble without the parser being
     the thing that breaks.
     """
-    _fields, body, _error = _split_frontmatter(content)
-    # Fall through either way — if frontmatter is missing we still parse the
-    # body. `validate` is the gatekeeper that decides whether the document
-    # is actually *valid*.
+    # Only the body matters here; validate() is the gatekeeper for frontmatter.
+    body = _split_frontmatter(content)[1]
 
     sections: Dict[str, str] = {}
     current_name: Optional[str] = None
@@ -375,7 +373,7 @@ def validate(content: str) -> ValidationResult:
         )
 
     # Frontmatter
-    fields, _body, fm_error = _split_frontmatter(content)
+    fields, _, fm_error = _split_frontmatter(content)
     if fm_error is not None:
         errors.append(fm_error)
     if fields is None:
