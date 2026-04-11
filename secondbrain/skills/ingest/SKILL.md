@@ -7,7 +7,7 @@ description: >
   unprocessed inbox files. Routes raw input to structured vault entries with
   mandatory wikilink enforcement.
 metadata:
-  version: "3.3.1"
+  version: "3.3.2"
 ---
 
 # Core Rule
@@ -19,6 +19,8 @@ All raw input becomes structured vault entries with full wikilinks and metadata.
 1. Read `_MANIFEST.md` for current vault state.
 2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
 3. For content templates, read `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`.
+4. For shared write rules (wikilinks, metadata order, atomic sections, entity stubs), read `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`.
+5. For script commands (`verify_vault.py`, `archive_inbox.py`, `create_entity_stubs.py`), read `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`.
 
 # Pre-Conditions (verify before executing)
 - MCP connection is live: `mcp__obsidian__vault_list` with path `/` returns
@@ -38,35 +40,12 @@ All raw input becomes structured vault entries with full wikilinks and metadata.
 
 # Processing Rules (MANDATORY)
 
-## Rule 1: Wikilink Enforcement (NON-NEGOTIABLE)
+All shared write rules — wikilink enforcement, inline metadata field order, atomic sections, and entity-stub creation — are in `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`. Load that file. Those rules apply to every ingest without exception.
 
-Every piece of ingested content MUST be linked to ALL related entities.
+Ingest-specific extensions on top of the shared rules:
 
-For each piece of info, ask:
-- Who is involved? → `[[entities/person-name]]`
-- What domain? → `[[domain-name]]`
-- What decision/goal does this relate to? → `[[brain/decisions#section-name]]`
-- What other sections does this cross-reference? → `[[file#section]]`
-
-**NO UNLINKED INFORMATION ENTERS THE VAULT.** If text is written without wikilinks, go back and add them.
-
-## Rule 2: Inline Metadata (for tasks)
-
-Every task gets full metadata inline:
-
-```markdown
-- [ ] Task description [[entity]] #domain [due:: 2026-MM-DD] [energy:: low|medium|high] [est:: 15min|30min|1hr|2hr]
-```
-
-Field order: entity link → #domain → [due::] → [energy::] → [est::]
-
-## Rule 3: Atomic Sections
-
-Structure writes as atomic sections with clear headings, 1-3 bullets, wikilinks throughout.
-
-## Rule 4: Entity Creation
-
-If ingestion mentions a new entity not in the vault `entities/` folder, create the entity file. See **`references/routing-rules.md`** for template.
+- Routing table (which content type goes to which destination file) lives in `references/routing-rules.md` next to this skill.
+- Every ingest ends with the Karpathy wiki pattern in "Processing Algorithm" below — a single ingest touches multiple pages, not just one destination.
 
 # Processing Algorithm (Karpathy multi-page-touch discipline)
 
@@ -106,11 +85,11 @@ OUTPUT:
 ```
 
 # Post-Write Validation
-After ALL writes are complete:
-1. Run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} --modified-only [files-you-touched] --json`
-2. If errors found (missing entities, broken links), fix immediately
-3. For missing entities: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py ${VAULT_PATH} entity-name`
-4. Do NOT mark the operation as complete until validation passes
+
+Run the standard post-write validation block from
+`@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md` after ALL writes
+are complete. If errors are found (missing entities, broken links), fix
+immediately. Do NOT mark the operation complete until validation passes.
 
 # Response Style
 
@@ -153,6 +132,6 @@ Got it — 1 task (unclear on deadline, guessed this week), 1 idea.
 # Implementation Notes
 
 - Timestamp format: ISO 8601 local time
-- Entity names: kebab-case in filenames, wikilink as full name `[[entities/Xavier Laurens]]`
-- Metadata order on tasks: entity → #domain → [due::] → [energy::] → [est::]
+- Entity names: kebab-case in filenames, wikilink as full name `[[entities/kebab-name|Display Name]]`
+- Shared write rules (including task metadata order) are in `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`
 - If input has >10 items, process all, confirmation stays one line

@@ -6,7 +6,7 @@ description: >
   Full audit of all life threads — goals, milestones, commitments, deadlines,
   domains, decisions, entity follow-ups. Builds next week's plan. Scheduled task only.
 metadata:
-  version: "3.3.1"
+  version: "3.3.2"
 ---
 
 # Core Rule
@@ -18,6 +18,9 @@ Full vault audit. Review every life thread, celebrate wins, be direct about what
 1. Read `_MANIFEST.md` for current vault state.
 2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
 3. For content templates, read `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`.
+4. For shared write rules, read `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`.
+5. For the named DQL queries used in the audit, read `@${CLAUDE_PLUGIN_ROOT}/references/dql-patterns.md`.
+6. For script commands (`verify_vault.py`, `rebuild_manifest.py`), read `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`.
 
 # Steps
 
@@ -33,18 +36,20 @@ Read brain/battle-plan-milestones.md. What was this week's target? Hit or missed
 
 Read brain/status.md and audit each section:
 
-| Section | Check |
-|---------|-------|
-| URGENT (This Week) | Anything left undone? Carry forward or escalate? |
-| This Week | What carried over? Promote or demote? |
-| Ongoing | Anything stale (>2 weeks untouched)? Flag or move to Someday |
-| Waiting On | Anything unblockable or needing follow-up? |
-| Someday | Anything worth promoting based on goals/deadlines? |
-| Done (Recent) | Celebrate wins. Archive items >7 days old |
+| Section | Check | Query |
+|---------|-------|-------|
+| URGENT (This Week) | Anything left undone? Carry forward or escalate? | — |
+| This Week | What carried over? Promote or demote? | — |
+| Ongoing | Anything stale (>2 weeks untouched)? Flag or move to Someday | `stale-tasks` |
+| Waiting On | Anything unblockable or needing follow-up? | — |
+| Someday | Anything worth promoting based on goals/deadlines? | — |
+| Done (Recent) | Celebrate wins. Archive items >7 days old | `archive-candidates` |
+
+Named queries are defined in `@${CLAUDE_PLUGIN_ROOT}/references/dql-patterns.md`.
 
 ## 4. Deadline Check
 
-What's coming next week? Auto-promote tasks due within 7 days. Flag overdue items.
+What's coming next week? Run the `approaching-deadlines` query to surface tasks due within 7 days and auto-promote them. Run the `overdue-tasks` query and flag anything past due.
 
 ## 5. Domain Status
 
@@ -99,10 +104,11 @@ Present structured but concise:
 - If something is seriously behind schedule, say so plainly
 
 # Post-Write Validation
-After ALL writes are complete:
-1. Run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} --modified-only [files-you-touched] --json`
-2. If errors found, fix immediately
-3. Run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rebuild_manifest.py ${VAULT_PATH}` to update manifest
+
+Run the standard post-write validation block from
+`@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md` after ALL writes
+are complete. Then run `rebuild_manifest.py` (also documented there) to
+refresh `_MANIFEST.md` from the new vault state.
 
 # Forbidden Actions
 

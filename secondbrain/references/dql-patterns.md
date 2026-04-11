@@ -1,0 +1,90 @@
+# DQL Query Patterns
+
+> Named, reusable DQL queries used across skills. Skills should reference a
+> query by name (e.g., "run the `unprocessed-inbox` query") instead of
+> re-deriving the text inline.
+>
+> Syntax reference lives in
+> `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
+
+All queries are executed via `mcp__obsidian__dataview_query`.
+
+---
+
+## `unprocessed-inbox` — files awaiting ingest
+
+```
+TABLE file.name, file.ctime
+FROM "inbox"
+WHERE processed != true
+SORT file.ctime ASC
+```
+
+Used by: dream-protocol (Phase 2), session-start sweep, ingest entry point.
+
+## `stale-tasks` — no movement in >14 days
+
+```
+TASK
+FROM "brain/status"
+WHERE !done AND (date(today) - file.mtime) > dur(14 days)
+```
+
+Used by: dream-protocol (Phase 2), weekly-review. Stale = candidate for Someday
+section or flagged review.
+
+## `approaching-deadlines` — due within 7 days, not yet done
+
+```
+TASK
+FROM "brain/status"
+WHERE due AND (due - date(today)) <= dur(7 days) AND !done
+```
+
+Used by: dream-protocol (Phase 2 — auto-promotion input), deadline-check,
+weekly-review. Results that are not already in "Urgent This Week" should be
+promoted.
+
+## `archive-candidates` — tasks done >7 days ago
+
+```
+TASK
+FROM "brain/status"
+WHERE done AND (date(today) - done) > dur(7 days)
+```
+
+Used by: dream-protocol (Phase 2 — archive pass), weekly-review. Results move
+to `archive/completed-tasks-YYYY-MM.md`.
+
+## `overdue-tasks` — past due, not yet done
+
+```
+TASK
+FROM "brain/status"
+WHERE due AND due < date(today) AND !done
+```
+
+Used by: deadline-check, weekly-review, morning-brief.
+
+## `broken-links-and-orphans`
+
+DQL cannot traverse link targets, so this is a script call rather than a
+query. Use:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} --json
+```
+
+The JSON output includes `broken-wikilink` and `orphan` entries. See
+`@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md` for full usage.
+
+---
+
+## Fallback Order When a Query Returns Empty
+
+1. DQL query (preferred, structured)
+2. `mcp__obsidian__vault_search` — full-text
+3. `mcp__obsidian__vault_list` — path listing
+4. `mcp__obsidian__vault_read` — direct file read when the path is known
+
+If a tool errors, fall to the next. Do not retry the same failing tool.

@@ -7,7 +7,7 @@ description: >
   inbox reaches zero unread. Categorizes, extracts action items, labels important
   emails, archives noise. Inbox must be clean when done.
 metadata:
-  version: "3.3.1"
+  version: "3.3.2"
 ---
 
 # Core Rule
@@ -30,6 +30,7 @@ Be careful — don't gloss over emails. Missing an important email can be disast
 1. Read `_MANIFEST.md` for current vault state.
 2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
 3. For content templates, read `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`.
+4. For shared write rules (wikilinks, task metadata field order, atomic sections, entity stubs), read `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`.
 
 # Triage Algorithm
 
@@ -94,7 +95,7 @@ Use the Obsidian MCP (`vault_list` on `entities/`) to get the list of known cont
 
 # Action Item Format
 
-Every extracted action item follows ingest patterns:
+Every extracted action item follows the shared task format in `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md` — entity → #domain → [due::] → [energy::] → [est::]. Example for an email-derived task:
 
 ```markdown
 - [ ] [Action description] [[entities/sender-name]] #domain [due:: 2026-MM-DD] [energy:: low|medium|high] [est:: 15min|30min|1hr]
@@ -132,6 +133,6 @@ Urgent: Follow up with [[entities/mmh]] on LCA status (due tomorrow).
 - `get_email` is for reading full email content — call this for EVERY email before categorizing
 - Batch size for subagents: ~20 emails per subagent
 - Entity names: kebab-case filenames, wikilink as full name
-- All vault writes use [[wikilinks]] — no unlinked information
+- All vault writes follow `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`
 - Timestamps in local time (no UTC)
 - Apply "Important" label via `modify_labels`

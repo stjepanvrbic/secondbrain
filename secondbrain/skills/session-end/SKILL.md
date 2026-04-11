@@ -7,7 +7,7 @@ description: >
   vault files, and appends session log. MANDATORY last action of
   every session.
 metadata:
-  version: "3.3.1"
+  version: "3.3.2"
 ---
 
 # Core Rule
@@ -18,6 +18,8 @@ metadata:
 1. Read `_MANIFEST.md` for current vault state.
 2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
 3. For content templates, read `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`.
+4. For shared write rules (wikilinks, atomic sections, entity stubs), read `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`.
+5. For script commands, read `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`.
 
 # Pre-Conditions (verify before executing)
 - Read current brain/status.md BEFORE writing to detect existing sections
@@ -49,14 +51,11 @@ Append a new "Last Session Summary" section:
 **Status:** on-track | needs-attention | blocked
 ```
 
-Keep brief (3-5 lines max). Cite entities with [[wikilinks]]. State exactly where work paused.
+Keep brief (3-5 lines max). Follow the shared write rules in `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`. State exactly where work paused.
 
 ## 2. Flush Pending Vault Changes
 
-For ANY state changes made during session (new tasks, decisions, contacts, deadlines, status updates):
-- Write immediately to appropriate vault file(s)
-- Ensure all wikilinks are in place
-- This step confirms all changes are flushed (error check)
+For ANY state changes made during session (new tasks, decisions, contacts, deadlines, status updates), write immediately to the appropriate vault file(s) following the shared write rules in `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`. This step confirms all changes are flushed (error check).
 
 ## 3. Append to brain/session-log.md
 
@@ -79,7 +78,7 @@ Add entry at the top of file (reverse chronological):
 **Next session focus:** [[domain-name]]
 ```
 
-Keep to 1-3 bullet points per section. Always cite with [[wikilinks]]. No narrative — bullet points only.
+Keep to 1-3 bullet points per section. Shared wikilink rules apply (see `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`). No narrative — bullet points only.
 
 ## 4. Check inbox/ for unprocessed files
 
@@ -106,11 +105,11 @@ This is **append-only** — never edit existing entries. Format details in `@${C
 The richer session details still go in `brain/session-log.md` (step 3 above). `log.md` is the lightweight greppable index across ALL operations, not just sessions.
 
 # Post-Write Validation
-After ALL writes are complete:
-1. Run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} --modified-only [files-you-touched] --json`
-2. If errors found (missing entities, broken links), fix immediately
-3. For missing entities: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py ${VAULT_PATH} entity-name`
-4. Do NOT mark the operation as complete until validation passes
+
+Run the standard post-write validation block from
+`@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md` after ALL writes
+are complete. If errors are found (missing entities, broken links), fix
+immediately. Do NOT mark the operation complete until validation passes.
 
 # Error Handling
 
