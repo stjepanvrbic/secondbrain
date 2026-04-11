@@ -327,54 +327,111 @@ After the user provides a path:
 4. Wire the MCP connection to point to this vault
 5. Skip profile seeding (Step 6) if `me/profile.md` already has real content
 
-### 4b-health. Vault health check and migration (MANDATORY for Scenario 2)
+### 4b-health. Vault health check and migration
 
-**After connecting, ALWAYS run a full health check and clearly report results to the user.**
+**MANDATORY for Scenario 2. Execute every substep below IN ORDER. Do not skip any. Do not combine steps.**
 
-1. **Fill missing scaffolding:** Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/init_obsidian.py --vault-path "<path>" --skip-install` to create any missing directories or files (log.md, _MANIFEST.md, etc.). This never overwrites existing content.
+#### Substep 1: Fill missing scaffolding
 
-2. **Run verification:** `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "<path>" --json`
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/init_obsidian.py --vault-path "<path>" --skip-install
+```
 
-3. **Report results clearly to the user:**
+Never overwrites existing content. Creates missing dirs and critical files.
+
+#### Substep 2: Run verification — capture the output
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "<path>" --json
+```
+
+Save the JSON output. You will use it in Substep 5 and Substep 7.
+
+#### Substep 3: Report results to the user (MANDATORY — do not skip)
+
+Parse the JSON output from Substep 2. Print EXACTLY this format (substitute real counts):
+
 ```
 Vault health check:
   - N broken wikilinks
-  - N missing entity files  
+  - N missing entity files
   - N duplicate headings
-  - N stale inbox items (processed but not archived)
-  - _MANIFEST.md: missing/outdated
-  - brain/commitments.md: present (deprecated in v3.0 — replaced by status.md)
-  - etc.
+  - N stale inbox items
+  - N orphan files
+  - brain/commitments.md: <present/absent>
+  - _MANIFEST.md: <present/stale/missing>
+  - log.md: <present/missing>
 ```
 
-4. **Detect v2.x → v3.0 migration needs and explain them:**
-   - If `brain/commitments.md` exists: "commitments.md is deprecated in v3.0. brain/status.md is now the single source of truth for tasks. I'll archive commitments.md to archive/ and ensure status.md has all active tasks."
-   - If inbox has items with `[processed:: true]` still in inbox/: "v3.0 moves processed inbox items to archive/inbox/ instead of marking them in place. I'll move N processed items to archive."
-   - If `_MANIFEST.md` is missing or stale: "I'll rebuild the manifest."
-   - If `log.md` is missing: "I'll create log.md."
+#### Substep 4: Explain migration needs (only if relevant)
 
-5. **Ask permission before fixing:**
+Check for these specific v2→v3 markers and print explanation for each that applies:
+
+- `brain/commitments.md` exists → "commitments.md is deprecated since v3. Tasks now live in brain/status.md. I'll archive commitments.md to archive/commitments-v2.md."
+- Inbox has files containing `[processed:: true]` → "v3 moves processed inbox items to archive/inbox/ instead of marking them in place. I'll move them to archive."
+- Missing entity files (from verify output entity-stubs check) → "N entity files are referenced but don't exist. I'll create stubs."
+
+If none apply, skip this substep.
+
+#### Substep 5: ASK PERMISSION — do not proceed without an answer
+
+**MANDATORY STOP POINT. Print this exact prompt and WAIT for response:**
+
 ```
-I found N issues. Want me to fix them now?
+I found N errors and N warnings. I can fix most of them automatically. Want me to proceed?
 
   1. Yes — fix everything (recommended)
   2. Show me details first
-  3. Skip — I'll deal with it later
+  3. Skip fixes — I'll deal with them later
 
 Which one? (1, 2, or 3)
 ```
 
-6. **If user says yes (or after showing details):**
-   - Archive `brain/commitments.md` → `archive/commitments-v2.md` (never delete)
-   - Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py "<path>"` to move processed inbox items
-   - Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rebuild_manifest.py "<path>"`
-   - Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "<path>" --fix` for auto-fixable issues (duplicate headings)
-   - Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py "<path>" --from-json <verify-output>` for missing entities
-   - Print summary of what was fixed
+If user picks **2**: print each error from the JSON, then re-ask (1 or 3).
+If user picks **3**: skip to Step 5 (scheduled tasks) — note that vault has unresolved issues.
+If user picks **1**: proceed to Substep 6.
 
-7. **Run dream-protocol to consolidate:**
-   After fixes, tell the user: "I'll run the dream-protocol skill to consolidate the vault and ensure everything is consistent with the v3.0 structure."
-   Invoke `/secondbrain:dream-protocol`.
+#### Substep 6: Execute fixes in order
+
+Run each command and report pass/fail:
+
+1. If `brain/commitments.md` exists: move it to `archive/commitments-v2.md` via vault_patch or shell `mv`
+2. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py "<path>"`
+3. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rebuild_manifest.py "<path>"`
+4. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "<path>" --fix --json` (auto-fixes duplicate headings)
+5. For each missing entity in the verify output: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py "<path>" <entity-name>` (or pass `--from-json <file>`)
+
+Print summary:
+```
+Fixed:
+  - Archived commitments.md
+  - Moved N processed inbox items to archive/inbox/
+  - Rebuilt _MANIFEST.md
+  - Auto-fixed N duplicate headings
+  - Created N entity stubs
+```
+
+#### Substep 7: Run dream-protocol to consolidate
+
+Print: "Running dream-protocol to consolidate the vault..."
+Invoke `/secondbrain:dream-protocol`.
+
+#### Substep 8: Final verification
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "<path>" --json
+```
+
+Compare error count before/after. Print:
+```
+Before: N errors, M warnings
+After:  N errors, M warnings
+Fixed:  N errors resolved
+```
+
+If errors remain, list them — these need human judgment.
+
+---
 
 This is the path for users who already have a vault on another device (synced via Obsidian Sync, iCloud, etc.) or who are installing the plugin in Claude Code after using it in Cowork. **The vault may have been built under an older plugin version, so migration and health checks are essential.**
 
