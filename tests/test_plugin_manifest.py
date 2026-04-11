@@ -48,6 +48,9 @@ CLI_ENTRYPOINT_ALLOWLIST = {
     "doctor_checks.py",        # library-only: imported by doctor_cli (T5)
     "doctor_cli.py",           # CLI entry: invoked by the doctor skill via Bash (T5)
     "vault_git.py",            # CLI entry: invoked by Stop hook + undo-last-turn skill (wired up in T8/T9)
+    "hot_memory_schema.py",    # library-only: imported by validate_hot_memory + update_hot_memory (T10)
+    "validate_hot_memory.py",  # CLI entry: invoked by doctor/dream-protocol/ingester (wired up in T11/T13)
+    "update_hot_memory.py",    # CLI entry: invoked by dream-protocol + ingest subagent (wired up in T11/T13)
 }
 
 # Dirs the installer SHIPS to users. Nothing under here may contain dev cruft.
