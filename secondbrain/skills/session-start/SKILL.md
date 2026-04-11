@@ -7,7 +7,7 @@ description: >
   deadlines, and focus domain. Morning mode builds a day plan energy-matched
   to the user's rhythm.
 metadata:
-  version: "3.3.2"
+  version: "3.3.3"
 ---
 
 # Core Rule
@@ -15,9 +15,11 @@ metadata:
 **MANDATORY, FIRST ACTION OF EVERY SESSION.** Do NOT respond to the user's message until context is loaded. Ensure Claude operates with current awareness of goals, urgency, and where work left off.
 
 # MUST READ EVERY SESSION, NON-NEGOTIABLE
-1. Read `_MANIFEST.md` for current vault state.
-2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
-3. For environment-specific paths, read `@${CLAUDE_PLUGIN_ROOT}/references/environments.md`.
+1. Read `@${CLAUDE_PLUGIN_ROOT}/references/session-start-bootstrap.md` for skill routing, state-change discipline, and re-invocation rules. This is the authoritative copy of the rules the SessionStart hook injects as a one-page summary.
+2. Read `_MANIFEST.md` for current vault state.
+3. Read `me/profile.md` for user bio, daily rhythms, and static preferences. This replaces the old CLAUDE.md "Who Is" / "Daily Rhythms" sections — all user-specific context now lives here.
+4. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
+5. For environment-specific paths, read `@${CLAUDE_PLUGIN_ROOT}/references/environments.md`.
 
 # First Actions
 1. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vault_guide.py ${VAULT_PATH}` — load dynamic vault context

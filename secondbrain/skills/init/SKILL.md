@@ -12,7 +12,7 @@ description: >
   Supports a `--verify` mode that runs verification only (no creates,
   no installs) for diagnosing existing installs.
 metadata:
-  version: "3.3.2"
+  version: "3.3.3"
 ---
 
 # Core Rule
@@ -370,6 +370,17 @@ Check for these specific v2→v3 markers and print explanation for each that app
 - `brain/commitments.md` exists → "commitments.md is deprecated since v3. Tasks now live in brain/status.md. I'll archive commitments.md to archive/commitments-v2.md."
 - Inbox has files containing `[processed:: true]` → "v3 moves processed inbox items to archive/inbox/ instead of marking them in place. I'll move them to archive."
 - Missing entity files (from verify output entity-stubs check) → "N entity files are referenced but don't exist. I'll create stubs."
+- `CLAUDE.md` exists at the vault root → print the legacy-CLAUDE.md note below. Do NOT auto-delete, auto-archive, or auto-rewrite it.
+
+**Legacy CLAUDE.md note (print when `CLAUDE.md` is present at the vault root):**
+
+```
+I see a CLAUDE.md at the vault root. Since v3.3.3 the plugin no longer
+ships a CLAUDE.md template — routing rules and user bio now live in
+plugin-owned files and in me/profile.md. Your existing CLAUDE.md is
+orphaned but harmless; I'm leaving it alone. You can delete it by hand
+whenever you want, or wait for a future migration script to archive it.
+```
 
 If none apply, skip this substep.
 
@@ -582,8 +593,8 @@ A few quick questions so I'm not starting cold:
 ```
 
 After answers:
-- Replace placeholders in `CLAUDE.md` (USER_NAME, USER_ROLE, USER_PREFERENCES)
-- Write answers into `me/profile.md` as a structured section
+- Open `me/profile.md` (scaffolded from `${CLAUDE_PLUGIN_ROOT}/skills/init/templates/profile.md` during Step 4)
+- Replace placeholders in `me/profile.md` with the user's answers: `{{USER_NAME}}`, `{{USER_ROLE}}`, `{{USER_PREFERENCES}}`. Leave the rhythm placeholders (`{{WAKEUP_TIME}}`, `{{MORNING_WINDOW}}`, etc.) with reasonable defaults (e.g., `8:00am`, `8am-12pm`, `12pm-6pm`, `6pm-10pm`) unless the user volunteers different values.
 - Print: `Profile seeded. It'll build up naturally from here — you can always edit me/profile.md directly.`
 
 ---
@@ -696,12 +707,11 @@ Run these checks and print pass/fail for each:
 5. `OBSIDIAN_MCP_PORT` set?
 6. `mcp__obsidian__vault_list` returns successfully?
 7. `_MANIFEST.md` exists in the vault?
-8. `CLAUDE.md` exists in the vault?
-9. `log.md` exists in the vault?
-10. `me/profile.md` exists with non-placeholder content?
-11. Standard folders present (brain/, entities/, inbox/, me/, archive/)?
-12. Scheduled tasks registered? (Code: `CronList`. Cowork: check `<workspace>/.scheduled-tasks/`)
-13. Last dream-protocol run successful? (Look at the most recent `dream-protocol` entry in `log.md`)
+8. `log.md` exists in the vault?
+9. `me/profile.md` exists with non-placeholder content?
+10. Standard folders present (brain/, entities/, inbox/, me/, archive/)?
+11. Scheduled tasks registered? (Code: `CronList`. Cowork: check `<workspace>/.scheduled-tasks/`)
+12. Last dream-protocol run successful? (Look at the most recent `dream-protocol` entry in `log.md`)
 
 Print a summary like:
 
@@ -715,14 +725,13 @@ secondbrain verification report:
   ✓ OBSIDIAN_MCP_PORT set (27124)
   ✓ MCP connection works
   ✓ _MANIFEST.md exists (last rebuilt 2026-04-08 02:00)
-  ✓ CLAUDE.md exists
   ✓ log.md exists (latest entry: 2026-04-09 02:00 dream-protocol)
   ✓ me/profile.md exists and has user content
   ✓ All standard folders present
   ✓ 6 scheduled tasks registered
   ✓ Last dream-protocol run: 2026-04-09 02:00 (clean)
 
-  All checks passed (13/13).
+  All checks passed (12/12).
 ```
 
 If any check fails, print the failing line in red with a specific fix command. Don't take any action — just report.
@@ -750,7 +759,8 @@ Every step has fallback behavior:
 
 - **Never** write to a file without permission, except files inside the vault scaffolding when the user has explicitly confirmed the vault path
 - **Never** run `chmod` or modify file permissions
-- **Never** modify existing `CLAUDE.md` content without the user's explicit confirmation (the seeding in Step 6 is the only exception, and only for new vault paths)
+- **Never** modify existing `me/profile.md` content beyond filling placeholders in Step 6 (seeding a fresh template). If the file already has real content, leave it alone.
+- **Never** touch a legacy plugin-generated `CLAUDE.md` in a user's vault. Since v3.3.3 the plugin no longer ships a CLAUDE.md template; existing files from v3.1.x–v3.3.2 installs are orphaned but harmless. Users can leave them, delete them, or wait for a future migration script to archive them. Do NOT delete or rewrite them on the user's behalf.
 - **Never** delete anything
 - **Never** silently fail — every error must be reported with a fix
 - **Never** assume the user has CLI knowledge (no `cd`, no `vim`, no shell tricks beyond `source ~/.zshrc`)

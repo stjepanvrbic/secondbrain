@@ -22,11 +22,16 @@ NON-scope (deliberately):
     - Scripts and Python source outside `references/` are not walked (their
       own tests cover them).
 
-DEPRECATED_PATHS grows as later plan themes land (e.g., `CLAUDE.md` joins
-when the template is eliminated; `references/ingestion-rules.md` becomes
-required-to-exist when Theme 2 introduces it). For now it's just the v2
-commitments file, which was deprecated by the v2→v3 migration but whose
-stale wikilinks kept shipping in `CLAUDE.md.template` and `_MANIFEST.md.template`.
+DEPRECATED_PATHS grows as later plan themes land. As of Theme 1 it covers:
+
+- `brain/commitments.md` — the v2 task file that was replaced by
+  `brain/status.md`. Stale wikilinks used to leak through
+  `CLAUDE.md.template` and `_MANIFEST.md.template`.
+- `CLAUDE.md` — since Theme 1 / v3.3.3, the plugin no longer ships a
+  CLAUDE.md template. Routing rules moved to `references/session-start-bootstrap.md`
+  (loaded via the SessionStart hook) and user bio moved to the runtime
+  `me/profile.md` file. Any surviving reference inside plugin markdown is
+  either documentation of the deprecation (allowlisted) or drift (a bug).
 """
 
 from __future__ import annotations
@@ -57,6 +62,7 @@ REFERENCES_DIR = PLUGIN_ROOT / "references"
 # which is legitimate cleanup prose — not a forward reference to fix.
 DEPRECATED_PATHS: tuple[str, ...] = (
     "brain/commitments.md",
+    "CLAUDE.md",
 )
 
 # Files that are ALLOWED to mention deprecated paths because they explicitly
@@ -73,7 +79,15 @@ DEPRECATION_DOC_ALLOWLIST: frozenset[str] = frozenset({
     "references/templates.md",
     "references/vault-navigation.md",
     # init walks the user through cleaning up v2 artifacts — it MUST name them.
+    # Since Theme 1 it also prints the legacy-CLAUDE.md note for v3.1.x–v3.3.2
+    # users who have an orphaned plugin-generated CLAUDE.md at the vault root.
     "skills/init/SKILL.md",
+    # dream-protocol and session-start each name CLAUDE.md exactly once, in a
+    # "don't touch the legacy file" forbidden-action (dream-protocol) or a
+    # "load profile.md instead of the old CLAUDE.md sections" note
+    # (session-start). Both are pedagogical, not live references.
+    "skills/dream-protocol/SKILL.md",
+    "skills/session-start/SKILL.md",
 })
 
 # Regex pulling `${CLAUDE_PLUGIN_ROOT}/...` (with or without `@` prefix and

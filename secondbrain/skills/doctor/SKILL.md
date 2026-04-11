@@ -3,11 +3,11 @@ name: doctor
 description: >
   This skill should be used when the user asks "what's wrong with my
   secondbrain", "is everything working", "diagnose my setup", "fix my
-  vault", or "secondbrain not working". Runs a 13-point diagnostic and
+  vault", or "secondbrain not working". Runs a 12-point diagnostic and
   reports pass/fail with specific fix commands for each issue. Read-only —
   never modifies anything.
 metadata:
-  version: "3.3.2"
+  version: "3.3.3"
 ---
 
 # Core Rule
@@ -21,7 +21,7 @@ Run a comprehensive read-only diagnostic of the secondbrain plugin install. For 
 
 # Execution
 
-Run all 13 checks in order. Don't stop on the first failure — collect all results and report at the end.
+Run all 12 checks in order. Don't stop on the first failure — collect all results and report at the end.
 
 ## Check 1: Plugin install location
 
@@ -66,33 +66,28 @@ Run all 13 checks in order. Don't stop on the first failure — collect all resu
 - Try `mcp__obsidian__vault_read` on `_MANIFEST.md`
 - If failing: "The vault is missing _MANIFEST.md. Run /secondbrain:dream-protocol to rebuild it, or /secondbrain:init for a full setup if this is a fresh vault."
 
-## Check 9: `CLAUDE.md` exists in vault
-
-- Try `mcp__obsidian__vault_read` on `CLAUDE.md`
-- If failing: "The vault is missing CLAUDE.md. Run /secondbrain:init to create it from the template."
-
-## Check 10: `log.md` exists in vault
+## Check 9: `log.md` exists in vault
 
 - Try `mcp__obsidian__vault_read` on `log.md`
 - If failing: "The vault is missing log.md (the append-only audit trail). Run /secondbrain:init to create it, or manually create an empty log.md at the vault root."
 
-## Check 11: `me/profile.md` has user content (not template placeholders)
+## Check 10: `me/profile.md` has user content (not template placeholders)
 
 - Read `me/profile.md` and check for `{{USER_NAME}}` or similar placeholder
 - If still has placeholders: "Profile has not been filled in yet. Run /secondbrain:init to walk through profile setup."
 
-## Check 12: Standard folders present
+## Check 11: Standard folders present
 
 - Check existence of: `brain/`, `entities/`, `inbox/`, `me/`, `archive/`
 - For each missing: list it. Fix: "Run /secondbrain:dream-protocol or /secondbrain:init to create missing structure."
 
-## Check 13: Scheduled tasks registered
+## Check 12: Scheduled tasks registered
 
 - **Code:** Call `CronList` and check that all 6 bundled tasks (or whatever subset the user opted into) are registered
 - **Cowork:** Look for `<workspace>/.scheduled-tasks/` and check the SKILL.md files exist
 - If any are missing: list them. Fix: "Run /secondbrain:init to install missing scheduled tasks."
 
-## Check 14 (bonus): Last dream-protocol run successful
+## Check 13 (bonus): Last dream-protocol run successful
 
 - Read the last few lines of `log.md`
 - Find the most recent `dream-protocol` entry
@@ -117,14 +112,13 @@ secondbrain doctor report:
        Fix: make sure Obsidian is open AND the Connect MCP plugin is enabled
   - Vault reachable: SKIPPED (MCP connection must work first)
   - _MANIFEST.md exists: SKIPPED
-  - CLAUDE.md exists: SKIPPED
   - log.md exists: SKIPPED
   - me/profile.md has user content: SKIPPED
   - Standard folders present: SKIPPED
   - Scheduled tasks registered: SKIPPED (cannot check without MCP)
   - Last dream-protocol run: SKIPPED
 
-  Result: 4 passed, 2 failed, 8 skipped (downstream of failures).
+  Result: 4 passed, 2 failed, 7 skipped (downstream of failures).
 
   Recommended action: Fix the failing checks above (start with the
   shell config), then run /secondbrain:doctor again.
@@ -143,14 +137,13 @@ secondbrain doctor report:
   ✓ MCP connection works
   ✓ Vault reachable (143 files)
   ✓ _MANIFEST.md exists (last rebuilt 2026-04-09 02:00)
-  ✓ CLAUDE.md exists
   ✓ log.md exists (latest entry: 2026-04-09 02:00 dream-protocol)
   ✓ me/profile.md exists with user content
   ✓ All standard folders present (brain, entities, inbox, me, archive)
   ✓ 6 scheduled tasks registered (CronList confirms)
   ✓ Last dream-protocol run: 2026-04-09 02:00 (clean, no issues)
 
-  Result: 14/14 checks passed. Your secondbrain is healthy.
+  Result: 13/13 checks passed. Your secondbrain is healthy.
 ```
 
 # Implementation Notes

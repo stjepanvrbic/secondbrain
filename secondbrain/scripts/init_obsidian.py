@@ -561,21 +561,62 @@ def _print_manual_env(port: int, api_key: Optional[str]) -> None:
 
 REQUIRED_DIRS = ["brain", "entities", "me", "inbox", "archive", "archive/inbox", "scratch"]
 
+# `me/profile.md` is seeded from skills/init/templates/profile.md rather than
+# an inline string — the template is long enough that inlining it here would
+# be harder to read than a separate file, and keeping it on disk lets the init
+# skill and the scaffold stay in sync.
+PROFILE_TEMPLATE_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "skills" / "init" / "templates" / "profile.md"
+)
+
+# Placeholders the profile template uses. scaffold_vault writes the template
+# unchanged (placeholders intact) — the init skill fills them in during the
+# profile-seeding step after talking to the user.
+PROFILE_PLACEHOLDERS = (
+    "{{USER_NAME}}", "{{USER_ROLE}}", "{{USER_NEXT_ROLE}}",
+    "{{USER_PARTNER}}", "{{USER_PREFERENCES}}",
+    "{{WAKEUP_TIME}}", "{{MORNING_WINDOW}}",
+    "{{AFTERNOON_WINDOW}}", "{{EVENING_WINDOW}}",
+)
+
 CRITICAL_FILES = {
     "brain/status.md": "---\nupdated: {date}\n---\n# Status\n\n## Current Focus\n\n_No focus set yet._\n",
     "brain/deadlines.md": "# Deadlines\n\n_No deadlines tracked yet._\n",
     "brain/goals.md": "# Goals\n\n_No goals set yet._\n",
     "brain/decisions.md": "# Decisions\n\n_No decisions recorded yet._\n",
     "brain/session-log.md": "# Session Log\n",
-    "me/profile.md": "# Profile\n\n_Run /secondbrain:init to seed your profile._\n",
     "glossary.md": "# Glossary\n\n_Add terms and acronyms here._\n",
     "log.md": f"# Log\n\n## [{date.today().isoformat()} 00:00] init | Vault created\nInitial vault scaffolding.\n",
     "_MANIFEST.md": "# Vault Manifest\n\n**Files:** 0\n**Last updated:** {date}\n",
 }
 
 
+def _load_profile_template() -> str:
+    """Read the profile.md template shipped with the plugin.
+
+    Returns a minimal fallback string if the template file is missing, so
+    `scaffold_vault` still seeds a readable profile rather than crashing.
+    The fallback path only fires if the plugin install is broken; normal
+    runs read the full template.
+    """
+    try:
+        return PROFILE_TEMPLATE_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return (
+            "# Profile\n\n"
+            "_Run /secondbrain:init to seed your profile "
+            "(the template file is missing from the plugin install)._\n"
+        )
+
+
 def scaffold_vault(vault_path: Path, dry_run: bool = False) -> int:
-    """Create vault structure. Returns count of created items. Never overwrites."""
+    """Create vault structure. Returns count of created items. Never overwrites.
+
+    me/profile.md is seeded from skills/init/templates/profile.md if absent.
+    Existing profile.md files are never touched (same rule as every other
+    critical file).
+    """
     created = 0
     today = date.today().isoformat()
 
@@ -598,6 +639,17 @@ def scaffold_vault(vault_path: Path, dry_run: bool = False) -> int:
                 file_path.parent.mkdir(parents=True, exist_ok=True)
                 file_path.write_text(content)
             created += 1
+
+    # me/profile.md — seeded from the shipped template. Never overwrite an
+    # existing file; the init skill fills placeholders in a separate step.
+    profile_path = vault_path / "me" / "profile.md"
+    if not profile_path.exists():
+        if dry_run:
+            print("  WOULD CREATE file: me/profile.md (from template)")
+        else:
+            profile_path.parent.mkdir(parents=True, exist_ok=True)
+            profile_path.write_text(_load_profile_template())
+        created += 1
 
     # Ensure .obsidian directory exists
     obsidian_dir = vault_path / ".obsidian"

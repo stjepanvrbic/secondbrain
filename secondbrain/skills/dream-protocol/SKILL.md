@@ -7,7 +7,7 @@ description: >
   Performs a reflective consolidation pass over the vault — orienting on current
   state, gathering recent signal, consolidating changes, and verifying integrity.
 metadata:
-  version: "3.3.2"
+  version: "3.3.3"
 ---
 
 # Core Rule
@@ -122,7 +122,7 @@ Next session recommended focus: [[domain-name]]
 
 # Forbidden Actions
 
-- Modifying CLAUDE.md
+- Modifying `me/profile.md` or any legacy plugin-generated `CLAUDE.md` at the vault root
 - Deleting any files (move to archive, never delete)
 - Running during normal sessions (unless invoked by init)
 - Committing without descriptive message

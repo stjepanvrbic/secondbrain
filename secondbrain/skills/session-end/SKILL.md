@@ -7,7 +7,7 @@ description: >
   vault files, and appends session log. MANDATORY last action of
   every session.
 metadata:
-  version: "3.3.2"
+  version: "3.3.3"
 ---
 
 # Core Rule
@@ -128,7 +128,7 @@ immediately. Do NOT mark the operation complete until validation passes.
 - Leaving information only in conversation
 - Deleting inbox files
 - Committing partial changes
-- Modifying CLAUDE.md
+- Rewriting `me/profile.md` — session-end may APPEND newly-learned preferences to the "Learned Preferences" section, but must not touch the rest of the file
 
 # Implementation Notes
 

@@ -6,7 +6,7 @@ description: >
   "I'm back" or "ready to go", or when a session starts without a clear task.
   Serves ONE task with micro-steps and energy matching. FORBIDDEN to present options.
 metadata:
-  version: "3.3.2"
+  version: "3.3.3"
 ---
 
 # Core Rule
@@ -15,7 +15,8 @@ The user NEVER decides what to do. Pick ONE task and serve it. Reason holistical
 
 # Prerequisites
 1. Read `_MANIFEST.md` for current vault state.
-2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
+2. Read `me/profile.md` for the user's daily rhythms and energy windows — this is the source of truth for what kind of work fits the current time of day. The defaults in "Energy Mapping" below are fallbacks for a fresh install.
+3. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
 
 # Decision Algorithm
 
