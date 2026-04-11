@@ -60,8 +60,7 @@ All wiki pages with one-line summaries. Maintained by dream-protocol nightly.
 
 | File | Purpose |
 |------|---------|
-| [[brain/status]] | Current state — updated by dream-protocol |
-| [[brain/commitments]] | All tasks with Dataview metadata |
+| [[brain/status]] | Current state + all tasks with Dataview metadata — updated by dream-protocol |
 | [[brain/deadlines]] | Hard dates and countdowns |
 | [[brain/goals]] | Life goals |
 | [[brain/decisions]] | Decisions + rationale |
