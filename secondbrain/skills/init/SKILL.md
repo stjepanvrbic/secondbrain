@@ -12,7 +12,7 @@ description: >
   Supports a `--verify` mode that runs verification only (no creates,
   no installs) for diagnosing existing installs.
 metadata:
-  version: "3.2.0"
+  version: "3.2.2"
 ---
 
 # Core Rule

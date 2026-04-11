@@ -1,6 +1,6 @@
 {
   "name": "secondbrain",
-  "version": "3.2.0",
+  "version": "3.2.2",
   "description": "Persistent memory and scheduled life-management for Claude Code and Claude Cowork, backed by your own Obsidian vault. Daily briefings, deadline tracking, knowledge graph, multi-device sync. Dummy-proof setup via /secondbrain:init.",
   "author": {
     "name": "stjepanvrbic"
