@@ -333,9 +333,8 @@ class TestAddVaultToConfigWithPush:
         data = json.loads(isolated_config.read_text())
         assert data["vaults"][0]["with_push"] is True
 
-    def test_readd_same_with_push_is_noop(
-        self, isolated_config: Path, tmp_path: Path
-    ):
+    @pytest.mark.usefixtures("isolated_config")
+    def test_readd_same_with_push_is_noop(self, tmp_path: Path):
         vault = tmp_path / "vault1"; vault.mkdir()
         add_vault_to_config(vault, "id-1", "Vault One", with_push=True)
 
