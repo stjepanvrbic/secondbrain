@@ -66,6 +66,22 @@ WHERE due AND due < date(today) AND !done
 
 Used by: deadline-check, weekly-review, morning-brief.
 
+## `entities-to-verify` — wikilinks ingest flagged as uncertain
+
+```
+TABLE file.link AS "Source", verify
+FROM ""
+WHERE verify = true
+SORT file.mtime DESC
+```
+
+Finds every line tagged `[verify:: true]` — ingest uses this marker whenever
+it had to guess which entity a wikilink points at (see Rule 2a in
+`@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`). Used by:
+dream-protocol (Phase 2 — gathered, Phase 3 — fuzzy-resolved or promoted to
+`scratch/to-verify.md`). The flag stays in place until dream-protocol can
+resolve it against a canonical entity, so the query is self-healing.
+
 ## `broken-links-and-orphans`
 
 DQL cannot traverse link targets, so this is a script call rather than a

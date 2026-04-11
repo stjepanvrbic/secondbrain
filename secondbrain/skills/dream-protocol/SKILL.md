@@ -7,7 +7,7 @@ description: >
   Performs a reflective consolidation pass over the vault — orienting on current
   state, gathering recent signal, consolidating changes, and verifying integrity.
 metadata:
-  version: "3.3.3"
+  version: "3.3.4"
 ---
 
 # Core Rule
@@ -47,6 +47,7 @@ Use DQL queries to find what needs attention. Don't exhaustively read everything
 - **Tasks approaching deadlines** — run the `approaching-deadlines` query. Results not already in "Urgent This Week" are promoted in Phase 3.
 - **Archive candidates** — run the `archive-candidates` query (completed tasks >7 days old).
 - **Broken wikilinks and orphan files** — use `verify_vault.py` per `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`. DQL cannot traverse link targets.
+- **Entities flagged for verification** — run the `entities-to-verify` query (finds `[verify:: true]` inline markers ingest left behind for ambiguous entity links). Phase 3 resolves or promotes each.
 - **Contradicted content** — vault statements that no longer reflect current reality.
 
 # Phase 3 — Consolidate
@@ -59,13 +60,19 @@ Process everything found in Phase 2. Full details in `references/execution-pipel
 - Promote tasks approaching deadlines to "Urgent This Week"
 - Flag stale tasks (>14 days), move to Someday
 - Fix broken wikilinks (fuzzy match, create missing entities via `create_entity_stubs.py`)
+- Resolve `[verify:: true]` entity markers: for each, fuzzy-match against existing entity files (same mechanism used for broken wikilinks). If a clear canonical entity exists, update the wikilink to point at it, remove the `[verify:: true]` flag, and log the resolution. If no match, append the context (original file, line, surrounding sentence, timestamp) to `scratch/to-verify.md` for human review and leave the inline flag in place. Log either outcome in `log.md`.
 - Deduplicate near-identical content (keep canonical, replace with wikilink)
 - Add wikilinks to orphan content mentioning known entities
 - Archive completed tasks >7 days old to monthly archive
 - Refresh brain/status.md hot cache
 - Check project completion by domain
 - Convert relative dates to absolute dates
-- Delete contradicted facts at the source — if new info disproves old, fix it
+- Resolve contradicted content via **soft-archive** (never delete):
+  - Move the superseded file (or the extracted superseded section as a new file) to `archive/contradictions/YYYY-MM/<slug>.md` via MCP `vault_create` + `vault_delete`.
+  - Write a sidecar `<slug>.sidecar.md` next to it containing: (1) the superseded content verbatim, (2) the new content that contradicts it, (3) where the new content came from (session-log entry, inbox file, entity page, etc.), (4) the reasoning for choosing the new over the old.
+  - Update the live vault file with the new content, linking back to the archived copy so the original is recoverable.
+  - Append to `log.md`: `## [YYYY-MM-DD HH:MM] dream-protocol | contradiction-resolved | <subject>` with a one-line body pointing at both the live file and the archived copy.
+  - No hard deletes. The archived content remains recoverable.
 
 # Phase 4 — Verify & Index
 

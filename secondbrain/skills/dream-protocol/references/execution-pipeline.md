@@ -71,12 +71,18 @@ Run the `archive-candidates` query. Results move to `archive/completed-tasks-YYY
 
 DQL cannot traverse link targets — use `verify_vault.py --json` per `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`. Parse the JSON for `broken-wikilink` and `orphan` entries.
 
-### 2.7 Contradicted Content
+### 2.7 Entities Flagged for Verification
+
+Run the `entities-to-verify` query from `@${CLAUDE_PLUGIN_ROOT}/references/dql-patterns.md`. Ingest leaves `[verify:: true]` inline whenever it had to guess an entity link. Collect each hit (source file, line, surrounding context) for Phase 3.5a resolution.
+
+### 2.8 Contradicted Content
 
 Scan for vault content that contradicts current state:
 - Status entries that no longer reflect reality (e.g., "blocked by X" when X is resolved)
 - Task descriptions with outdated context
 - Entity files with stale information
+
+Do NOT resolve contradictions here — only gather. Phase 3.12 soft-archives them.
 
 ---
 
@@ -156,6 +162,36 @@ FOR each broken link flagged in Phase 2.6:
      b. Note for manual review
 ENDFOR
 ```
+
+### 3.5a Verify-Entity Resolution
+
+Ingest leaves `[verify:: true]` inline next to wikilinks it had to guess. Process each hit from Phase 2.7:
+
+```
+FOR each [verify:: true] hit:
+  1. Read the wikilink target from the same line (e.g., [[entities/jane-smith|Jane]])
+  2. Fuzzy-match the display text against existing entities/ files
+     (same >80% string-similarity mechanism as Phase 3.5)
+  3. IF a clear canonical entity exists:
+     a. Rewrite the line to point at the canonical wikilink
+     b. Remove the `[verify:: true]` marker from that line
+     c. Append to log.md:
+        ## [YYYY-MM-DD HH:MM] dream-protocol | verify-resolved | <entity>
+        Linked <source-file>#<line> → [[entities/canonical]]
+  4. IF no clear match:
+     a. Append a block to scratch/to-verify.md:
+        ## <entity-guess> — [YYYY-MM-DD HH:MM]
+        - Source: [[<source-file>#<section or line>]]
+        - Context: "<surrounding sentence>"
+        - Current wikilink: [[entities/best-guess|Best Guess]]
+     b. Leave the `[verify:: true]` inline flag in place so the next dream run re-checks it
+     c. Append to log.md:
+        ## [YYYY-MM-DD HH:MM] dream-protocol | verify-deferred | <entity>
+        Context moved to [[scratch/to-verify]]
+ENDFOR
+```
+
+The flag is DQL-queryable and auto-heals when the canonical entity eventually exists, so the only manual work left is reviewing `scratch/to-verify.md`.
 
 ### 3.6 Deduplication
 
@@ -247,15 +283,38 @@ FOR each file modified during this run:
 ENDFOR
 ```
 
-### 3.12 Contradiction Cleanup
+### 3.12 Contradiction Soft-Archive
+
+Never hard-delete contradicted content. Move it to `archive/contradictions/YYYY-MM/` with a sidecar so the resolution is recoverable and auditable.
 
 ```
-FOR each contradicted item flagged in Phase 2.7:
-  - Delete the outdated/contradicted fact at the source
-  - If new info disproves old, update the original file directly
-  - Do NOT leave both versions — resolve to the current truth
+FOR each contradicted item flagged in Phase 2.8:
+  1. Slugify a short subject for the archive filename (e.g., `acme-renewal-date`)
+  2. Create the archive copy via MCP vault_create:
+        archive/contradictions/YYYY-MM/<slug>.md
+     Body: the superseded content verbatim (either the whole file, or just the
+     contradicted section, whichever is the smallest coherent unit).
+  3. Create a sidecar via MCP vault_create:
+        archive/contradictions/YYYY-MM/<slug>.sidecar.md
+     Containing the FOUR required pieces of information:
+        (1) Superseded content — verbatim
+        (2) New content — the statement that now supersedes it
+        (3) Source of new content — session-log entry, inbox file, entity
+            page, email, etc. as a [[wikilink]] when possible
+        (4) Resolution reasoning — why the new content wins (date, authority,
+            direct observation, etc.)
+  4. Update the live vault file with the new content. Add a one-line backlink:
+        > Superseded content archived at
+        > [[archive/contradictions/YYYY-MM/<slug>]]
+  5. Append to log.md:
+        ## [YYYY-MM-DD HH:MM] dream-protocol | contradiction-resolved | <subject>
+        <one-line body: live file + archive path>
+  6. Do NOT call vault_delete on the original content — the archive copy IS
+     the preservation. Edit the live file in place to the new state.
 ENDFOR
 ```
+
+Recoverability is the point: any resolution can be inspected and reversed by reading the archive + sidecar pair.
 
 ---
 

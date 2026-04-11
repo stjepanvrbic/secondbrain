@@ -38,6 +38,22 @@ Order: **entity link → #domain → [due::] → [energy::] → [est::]**
 
 Completed tasks carry a done stamp: `- [x] Task description [done:: YYYY-MM-DD]`
 
+### Rule 2a — `[verify:: true]` for uncertain entity links
+
+When a write has to guess at which entity a wikilink points to (ambiguous name, new person with no canonical entity file yet, typo that might collide with an existing entity), the writer MUST flag it with a structured inline marker on the same line as the wikilink:
+
+```markdown
+- Mentioned Jane from Acme re: renewal [[entities/jane-smith|Jane]] [verify:: true]
+```
+
+Why structured instead of a prose comment:
+
+- Dream-protocol runs a nightly DQL query for `[verify:: true]` and either auto-resolves via fuzzy match once a canonical entity exists, or promotes the context to `scratch/to-verify.md` for human review.
+- A prose `<!-- verify entity link -->` comment is invisible to DQL and will never be found.
+- The flag stays in place until dream-protocol successfully resolves it; it is self-healing as the vault grows.
+
+Field order when combined with task metadata: append `[verify:: true]` at the END of the line, AFTER `[est::]`. Do not insert it mid-sequence.
+
 ## Rule 3 — Atomic Sections
 
 Structure every write as an atomic section with a clear, searchable heading, 1-3 bullets, and wikilinks throughout. One concept per section. No sprawling prose dumps.
