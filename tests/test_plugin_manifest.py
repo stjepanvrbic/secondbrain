@@ -47,6 +47,7 @@ CLI_ENTRYPOINT_ALLOWLIST = {
     "connect_mcp_client.py",   # library-only: imported by dream/hot-memory/doctor (wired up in T10/T11/T13/T14)
     "doctor_checks.py",        # library-only: imported by doctor_cli (T5)
     "doctor_cli.py",           # CLI entry: invoked by the doctor skill via Bash (T5)
+    "vault_git.py",            # CLI entry: invoked by Stop hook + undo-last-turn skill (wired up in T8/T9)
 }
 
 # Dirs the installer SHIPS to users. Nothing under here may contain dev cruft.
