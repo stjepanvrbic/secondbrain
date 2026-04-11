@@ -14,11 +14,7 @@ Read individual files only when you need full context that a query cannot provid
 ## Zettelkasten Principles
 
 - **Atomic notes**: one concept per section/file
-- **Everything links**: every piece of content references related entities, files, and sections via [[wikilinks]]
-- **Entity links**: `[[entities/kebab-name|Display Name]]`
-- **Section links**: `[[file#Section Heading]]`
-- **Domain links**: `[[domain-name]]`
-- **NO unlinked information enters the vault** — if you write text without wikilinks, go back and add them
+- **Everything links**: every piece of content references related entities, files, and sections via [[wikilinks]] — see `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md` for the canonical wikilink rules and link formats
 
 ## Vault Structure
 
@@ -131,25 +127,13 @@ The MCP server is provided by the Connect MCP plugin (`connect-mcp`). Obsidian m
 
 ## Scripts
 
-Deterministic operations are handled by Python scripts in `scripts/`. Run these from the command line.
+Deterministic operations are handled by Python scripts in `scripts/`. Canonical invocation patterns (flags, usage in skill flows) are defined in `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`. Name-only index for discoverability:
 
-| Script | Usage | Description |
-|--------|-------|-------------|
-| `verify_vault.py` | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} [--modified-only file1 file2] [--json]` | Validates vault integrity: checks for missing entities, broken wikilinks, orphaned files, and structural issues. Use `--modified-only` to scope checks to specific files after edits. |
-| `create_entity_stubs.py` | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py ${VAULT_PATH} entity-name` | Creates a stub entity file in `entities/` with standard frontmatter. Use when a wikilink references an entity that does not exist yet. |
-| `archive_inbox.py` | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py ${VAULT_PATH}` | Moves processed inbox files to `archive/inbox/`. Run after ingest processing is complete. |
-| `rebuild_manifest.py` | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rebuild_manifest.py ${VAULT_PATH}` | Regenerates `_MANIFEST.md` from current vault state. Normally run by dream-protocol, but can be invoked manually. |
-| `vault_guide.py` | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vault_guide.py ${VAULT_PATH}` | Outputs dynamic vault context summary: active domains, recent activity, current focus, key stats. Run at session-start for up-to-date orientation. |
-
-## Wikilink Rules (NON-NEGOTIABLE)
-
-- ALL vault content MUST use [[wikilinks]] to reference related entities, files, and sections
-- Entity links: `[[entities/kebab-name|Display Name]]`
-- Section links: `[[file#Section Heading]]`
-- Domain links: `[[domain-name]]`
-- Every task MUST link to at least one entity
-- Every bullet point SHOULD contain at least one [[wikilink]]
-- NO unlinked information enters the vault
+- `verify_vault.py` — vault integrity check (broken wikilinks, missing entities, duplicate headings)
+- `create_entity_stubs.py` — create missing entity files from names or verify JSON
+- `archive_inbox.py` — move processed inbox files to `archive/inbox/`
+- `rebuild_manifest.py` — regenerate `_MANIFEST.md` from current vault state
+- `vault_guide.py` — dynamic vault context summary (active domains, recent activity, current focus); run at session-start
 
 ## See Also
 

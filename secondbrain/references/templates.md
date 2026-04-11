@@ -9,13 +9,7 @@
 
 ### Task
 
-```markdown
-- [ ] Task description [[entities/kebab-name|Display Name]] #domain [due:: YYYY-MM-DD] [energy:: low|medium|high] [est:: 5min|10min|15min|30min|1hr|2hr]
-```
-
-Field order: entity link → #domain → [due::] → [energy::] → [est::]
-
-Completed: `- [x] Task description [done:: YYYY-MM-DD]`
+Task template and field order are defined in `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md` (Rule 2).
 
 ### Decision Entry
 
