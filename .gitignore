@@ -1,16 +1,4 @@
 .DS_Store
-Thumbs.db
-*.plugin
-*.zip
-*.tmp
-.vscode/
-.idea/
+excalidraw.log
 __pycache__/
 .pytest_cache/
-*.pyc
-excalidraw.log
-
-# .mcp.json is intentionally NOT ignored — it's the plugin's MCP config
-# and must ship with the plugin for the public install to work.
-# Secrets are referenced via ${OBSIDIAN_API_KEY} env-var substitution,
-# never hardcoded.
