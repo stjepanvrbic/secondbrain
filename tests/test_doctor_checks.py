@@ -540,6 +540,27 @@ class TestCheckHotMemorySchema:
         assert "hot-memory" in r.message.lower()
         assert "brain/hot-memory.md" in r.message or "brain" in r.message
 
+    def test_file_missing_is_fixable_by_create_hot_memory_initial(self, tmp_path: Path):
+        """T14 makes the "file missing" branch auto-fixable via
+        setup_steps.create_hot_memory_initial so doctor --treat can
+        seed the INITIAL_TEMPLATE without falling back to
+        /secondbrain:dream-protocol.
+        """
+        plugin_root = self._real_plugin_root()
+        vault = tmp_path / "vault"
+        (vault / "brain").mkdir(parents=True)
+        r = check_hot_memory_schema(vault, plugin_root)
+        assert r.status == "fail"
+        assert r.fixable is True, (
+            "missing hot-memory.md must be marked fixable — T14 wires "
+            "create_hot_memory_initial as the treatment path."
+        )
+        assert r.fix_function == "create_hot_memory_initial", (
+            "fix_function must name create_hot_memory_initial so the "
+            "treatment dispatcher in doctor_checks.run_fixable_treatments "
+            "can look it up on setup_steps."
+        )
+
     def test_pass_when_file_valid(self, tmp_path: Path):
         """A valid hot-memory.md (INITIAL_TEMPLATE) should pass."""
         import sys

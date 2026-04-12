@@ -68,6 +68,12 @@ def healthy_vault_for_cli(tmp_path: Path) -> Path:
         "# Log\n\n## [2026-04-10 02:00] dream-protocol | all green\nDone.\n"
     )
     (vault / "me" / "profile.md").write_text("# Profile\n\nName: Tester\n")
+    # T14: hot-memory.md is now a fixable check target ("file missing" →
+    # create_hot_memory_initial). A healthy vault must have a valid one,
+    # otherwise --treat will create it and fail the "healthy is a no-op"
+    # invariant.
+    from hot_memory_schema import INITIAL_TEMPLATE  # type: ignore[reportMissingImports]
+    (vault / "brain" / "hot-memory.md").write_text(INITIAL_TEMPLATE)
     vid = str(uuid.uuid4())
     (vault / ".secondbrain-installed").write_text(
         json.dumps({"vault_id": vid}, indent=2)

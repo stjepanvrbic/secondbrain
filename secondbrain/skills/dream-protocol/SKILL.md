@@ -42,7 +42,6 @@ Use DQL queries to find what needs attention. Don't exhaustively read everything
   - New entities mentioned but not yet created
   - Context and insights worth persisting to vault files
   - Status changes not yet reflected in brain/status.md
-  - Transcript search — if you need specific context (e.g., "what was the error message from yesterday's build failure?"), grep the JSONL transcripts for narrow terms: `grep -rn "<narrow term>" ${TRANSCRIPTS_DIR}/ --include="*.jsonl" | tail -50`. Don't exhaustively read transcripts — only look for things you already suspect matter.
 - **Stale tasks** — run the `stale-tasks` query (no movement >14 days).
 - **Tasks approaching deadlines** — run the `approaching-deadlines` query. Results not already in "Urgent This Week" are promoted in Phase 3.
 - **Archive candidates** — run the `archive-candidates` query (completed tasks >7 days old).
@@ -116,6 +115,39 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vault_git.py commit-stop \
 ```
 
 Then continue. dream-protocol should **never hard-fail** on a commit issue — the vault content is already on disk from Phases 1-5, so the night's work is durable regardless of whether the commit landed. Doctor or the next Stop hook invocation will retry the commit.
+
+# Phase 7 — Regenerate hot memory
+
+After Phase 6 (commit), regenerate `brain/hot-memory.md` from scratch
+based on the now-clean vault state:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/update_hot_memory.py \
+    --regenerate --vault "${VAULT_PATH}"
+```
+
+The script reads vault state via Connect MCP, builds the hot-memory
+structure per the T10 schema, validates the token budget, and writes
+the file atomically. The PreToolUse `enforce-immutability.sh` hook
+protects `brain/hot-memory.md` from agent writes; the script bypasses
+that guard via a direct HTTP call to Connect MCP (same path the ingester
+uses when it runs `update_hot_memory.py --apply`).
+
+**Fail soft.** If the regenerate script exits non-zero, log the stderr
+verbatim to `.secondbrain/ingest-log.md` and leave the existing
+hot-memory file in place. Do not delete or truncate it. The next
+ingest cycle will keep updating it incrementally via `--apply`, so a
+single failed regenerate is a transient inconvenience, not data loss.
+
+```markdown
+## [YYYY-MM-DD HH:MM] dream-protocol | hot-memory regenerate failed
+<captured stderr>
+```
+
+Phase 7 runs after the commit so the regenerated hot-memory reflects
+the committed state on disk — if we regenerated before committing, the
+hot-memory would snapshot a state the user could never `git log` back
+to.
 
 # Execution Timing
 

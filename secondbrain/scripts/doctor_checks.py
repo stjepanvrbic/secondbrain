@@ -754,11 +754,14 @@ def check_hot_memory_schema(vault_path: Path, plugin_root: Path) -> CheckResult:
             name="hot_memory_schema",
             status="fail",
             message=(
-                f"hot-memory file missing at {hot_memory}. Run "
-                "/secondbrain:dream-protocol to regenerate it, or "
-                "/secondbrain:init if the vault has never been set up."
+                f"hot-memory file missing at {hot_memory}. Doctor can "
+                "seed it from the T10 INITIAL_TEMPLATE — run "
+                "/secondbrain:doctor and answer 'yes' to the treatment "
+                "prompt, or run /secondbrain:dream-protocol to regenerate "
+                "from live vault state."
             ),
-            fixable=False,
+            fixable=True,
+            fix_function="create_hot_memory_initial",
         )
 
     # Delegate to the real validator so doctor and dream-protocol share one

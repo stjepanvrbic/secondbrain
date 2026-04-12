@@ -473,6 +473,16 @@ After the user provides a source path:
 
 After vault setup, the VAULT_PATH must be available to all scripts and hooks. The init script writes env vars to the shell config. If the user specified a non-default vault path, also store it in the vault's `.secondbrain-installed` marker for future reference.
 
+## Seed brain/hot-memory.md
+
+**This step runs for ALL scenarios (fresh, connect, import).** After the vault is scaffolded (and vault_path is known) but before anything else touches the vault, seed `brain/hot-memory.md` with the T10 INITIAL_TEMPLATE so the SessionStart hook and the ingester both have a valid file to read on their next run. The helper is idempotent: on a Scenario 2 vault that already has a valid hot-memory, it's a no-op.
+
+```bash
+python3 -c "import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/scripts'); from setup_steps import create_hot_memory_initial; from pathlib import Path; r = create_hot_memory_initial(Path('${VAULT_PATH}')); print(r.message); sys.exit(0 if r.success else 1)"
+```
+
+Print the returned message. If the call fails, surface the error and continue — the first dream-protocol run will regenerate the file via `update_hot_memory.py --regenerate`, so this is a soft fallback rather than a hard blocker.
+
 ---
 
 # Step 4a — Vault git tracking

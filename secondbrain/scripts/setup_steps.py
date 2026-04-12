@@ -687,6 +687,95 @@ def create_log_md(vault_path: Path) -> StepResult:
     )
 
 
+def create_hot_memory_initial(vault_path: Path) -> StepResult:
+    """Seed `${vault_path}/brain/hot-memory.md` from the T10 INITIAL_TEMPLATE.
+
+    Idempotent: if the file already exists AND validates cleanly against
+    `hot_memory_schema.validate`, returns `did_work=False` without
+    touching it. Otherwise (missing, empty, or non-validating) writes
+    the template with a fresh ISO timestamp and returns `did_work=True`.
+
+    Used by:
+      - /secondbrain:init, to guarantee a brand-new vault has a
+        schema-valid hot-memory.md before the first ingest or session-
+        start hook fires.
+      - /secondbrain:doctor --treat, as the fix_function for the
+        `hot_memory_schema` check's "file missing" branch.
+
+    This helper writes directly to the filesystem rather than going
+    through `update_hot_memory.py` / Connect MCP because it runs
+    pre-init: during init we cannot assume the MCP server is wired up
+    yet, and during doctor we want the treatment to be local and
+    deterministic. The enforce-immutability hook that normally guards
+    hot-memory is a PreToolUse hook on MCP — direct filesystem writes
+    from Python happen outside that guard path.
+
+    The lazy import of `hot_memory_schema` is deliberate: it keeps
+    `setup_steps` importable by consumers (e.g. `doctor_checks`) that
+    don't want the schema module's import cost on every run.
+    """
+    # Lazy import to avoid circular import with hot_memory_schema's
+    # module-level INITIAL_TEMPLATE assembly and to keep `import
+    # setup_steps` cheap for callers that never touch hot-memory.
+    try:
+        from hot_memory_schema import (  # type: ignore[reportMissingImports]  # noqa: PLC0415
+            initial_template,
+            validate,
+        )
+    except ImportError as exc:
+        return StepResult(
+            success=False,
+            message="create_hot_memory_initial: hot_memory_schema not importable",
+            did_work=False,
+            error=str(exc),
+        )
+
+    hot_memory = vault_path / "brain" / "hot-memory.md"
+
+    # Already valid? Return no-op.
+    if hot_memory.exists():
+        try:
+            existing = hot_memory.read_text()
+        except OSError as exc:
+            return StepResult(
+                success=False,
+                message=f"create_hot_memory_initial: could not read {hot_memory}",
+                did_work=False,
+                error=str(exc),
+            )
+        if existing.strip() and validate(existing).ok:
+            return StepResult(
+                success=True,
+                message=(
+                    f"create_hot_memory_initial: {hot_memory} already exists "
+                    "and validates"
+                ),
+                did_work=False,
+            )
+        # Fall through — existing file is corrupt or empty, overwrite it.
+
+    try:
+        hot_memory.parent.mkdir(parents=True, exist_ok=True)
+        body = initial_template(
+            generated_by="setup_steps.create_hot_memory_initial",
+            generated_at=datetime.now().replace(microsecond=0).isoformat() + "Z",
+        )
+        hot_memory.write_text(body)
+    except OSError as exc:
+        return StepResult(
+            success=False,
+            message="create_hot_memory_initial: write failed",
+            did_work=False,
+            error=str(exc),
+        )
+
+    return StepResult(
+        success=True,
+        message=f"create_hot_memory_initial: wrote {hot_memory}",
+        did_work=True,
+    )
+
+
 def setup_vault_scaffolding(vault_path: Path) -> StepResult:
     """Create the required folder structure and critical files.
 
