@@ -110,7 +110,7 @@ The hooks fire automatically: the `SessionStart` hook injects pre-computed hot m
 | email-triage | 9:00am weekdays | `email-triage` | Reads every unread email, extracts action items (requires Gmail MCP) |
 | end-of-day-capture | 7:30pm daily | `end-of-day` | Reviews day, prompts for brain dump, flushes state |
 | weekly-review | 8:00pm Sundays | `weekly-review` | Full weekly audit, builds next week's plan |
-| dream-protocol | 2:00am daily | `dream-protocol` | Vault maintenance, deadline promotion, manifest rebuild, link repair |
+| dream-protocol | 2:00am daily | `dream-protocol` | Vault maintenance, deadline promotion, manifest rebuild, link repair, git commit, hot-memory regeneration |
 
 Scheduled tasks only run when Claude Desktop / Code is open and your computer is awake. They don't run on a remote server.
 
@@ -128,8 +128,17 @@ v3 introduces a **script-first architecture**: deterministic tasks are handled b
 | `scripts/rebuild_manifest.py` | Regenerates `_MANIFEST.md` from actual vault state (atomic write) |
 | `scripts/vault_guide.py` | Dynamic vault summary — file counts, top entities, active tasks, deadlines, inbox status |
 | `scripts/init_obsidian.py` | Automated setup — installs Obsidian, plugins, configures MCP, scaffolds vault |
+| `scripts/setup_steps.py` | Shared setup primitives used by both init and doctor (env vars, scaffolding, vault config, marker UUID) |
+| `scripts/connect_mcp_client.py` | HTTP wrapper around the Connect MCP API — lets scripts talk to Obsidian without going through Claude's tool layer |
+| `scripts/vault_git.py` | Git operations on the vault — init, commit, push, reset. CLI subcommands for hooks and skills. |
+| `scripts/doctor_checks.py` | 16-check engine for `/secondbrain:doctor` — diagnose-then-treat with dependency ordering |
+| `scripts/hot_memory_schema.py` | Schema definition and validator for `brain/hot-memory.md` (the pre-computed session context) |
+| `scripts/update_hot_memory.py` | The ONLY writer of `brain/hot-memory.md` — regenerate from vault state or apply incremental updates |
+| `scripts/emit_hot_memory.py` | Reads hot-memory and emits the SessionStart `systemMessage` JSON (called by the hook) |
+| `scripts/extract_new_turns.py` | Reads the conversation transcript + cursor, outputs a context envelope for the ingester |
+| `scripts/advance_cursor.py` | Atomically advances the per-session ingest cursor after successful processing |
 
-**Hook enforcement:** A `PostToolUse` hook (`hooks/validate-after-write.sh`) runs `verify_vault.py` after every vault write operation. If the script finds integrity errors, it blocks the agent with exit code 2 and forces it to fix the issues before continuing. The agent cannot skip validation.
+**Hook enforcement:** A `PreToolUse` hook (`hooks/enforce-mcp-only.sh`) blocks `Edit`/`Write`/`NotebookEdit` on vault paths and restricts `Bash` writes to a sanctioned-script allowlist. A `PostToolUse` hook (`hooks/validate-after-write.sh`) runs `verify_vault.py` after every vault write (MCP or sanctioned-script). If integrity checks fail, the agent is blocked until it fixes the issues.
 
 **Testing:** 1128 tests across the `tests/` suite (pytest, zero external dependencies). All scripts tested on macOS, Windows, and Linux.
 
@@ -199,7 +208,7 @@ Cowork doesn't support direct GitHub install for individual users — only organ
 
 ### "Something is broken and I don't know what"
 
-Run `/secondbrain:doctor` — it runs a 13-point read-only diagnostic and tells you exactly what's failing and how to fix each one.
+Run `/secondbrain:doctor` — it runs a 16-point read-only diagnostic and tells you exactly what's failing. If any checks fail, it asks "want me to fix these?" and can auto-repair most issues on your confirmation.
 
 ### "I want to start over"
 
