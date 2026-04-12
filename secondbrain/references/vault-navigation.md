@@ -49,9 +49,8 @@ Read individual files only when you need full context that a query cannot provid
 **Operations:** `ingest`, `session-start`, `session-end`, `dream-protocol`, `weekly-review`, `deadline-check`, `morning-brief`, `end-of-day`, `email-triage`, `init`, `manual`
 
 **Skills that MUST append entries:**
-- `ingest` — for every brain dump processed
+- `ingest` — for every brain dump processed (via the `secondbrain-ingester` subagent)
 - `dream-protocol` — for the nightly run summary
-- `session-end` — for the session summary
 - `email-triage` — for each scheduled triage run
 - `weekly-review` — for the weekly audit
 

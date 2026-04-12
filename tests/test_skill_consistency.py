@@ -47,6 +47,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parent.parent / "secondbrain"   # shipped
 SKILLS_DIR = PLUGIN_ROOT / "skills"
 SCHEDULED_TASKS_DIR = PLUGIN_ROOT / "scheduled-tasks"
 REFERENCES_DIR = PLUGIN_ROOT / "references"
+AGENTS_DIR = PLUGIN_ROOT / "agents"
 
 
 # ----------------------------------------------------------------------
@@ -131,6 +132,13 @@ def iter_linted_files() -> Iterable[Path]:
         for f in sorted(REFERENCES_DIR.rglob("*")):
             if f.is_file():
                 _add(f)
+
+    # Every markdown file under agents/ — subagent definitions (T13+)
+    # live here and reference ${CLAUDE_PLUGIN_ROOT}/scripts/... paths
+    # that must resolve to real files.
+    if AGENTS_DIR.is_dir():
+        for md in sorted(AGENTS_DIR.rglob("*.md")):
+            _add(md)
 
     return sorted(seen)
 
@@ -301,9 +309,13 @@ REQUIRED_REFERENCE_LOADS: dict[str, frozenset[str]] = {
     # Shared write rules (wikilinks, metadata field order, atomic sections,
     # entity stub creation, no-new-task-files, immediate flush). Every skill
     # that writes to the vault loads these.
+    #
+    # T13 retired skills/session-end (the flush discipline moved to the
+    # Stop hook + background ingester); it's no longer a consumer.
+    # T13 also moved ingest's actual work into the secondbrain-ingester
+    # subagent definition — the ingest skill is now a thin dispatcher
+    # that doesn't load ingestion-rules.md directly. The subagent does.
     "references/ingestion-rules.md": frozenset({
-        "skills/ingest/SKILL.md",
-        "skills/session-end/SKILL.md",
         "skills/dream-protocol/SKILL.md",
         "skills/email-triage/SKILL.md",
     }),

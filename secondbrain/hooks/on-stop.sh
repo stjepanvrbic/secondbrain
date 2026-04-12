@@ -260,15 +260,189 @@ PY
 set -e
 
 # ---------------------------------------------------------------------------
-# T13: dispatch secondbrain-ingester subagent here
+# T13: Dispatch the secondbrain-ingester subagent.
 #
-# Phase 3 (Theme 3) will add the ingester dispatch at this point. The
-# ingester runs asynchronously to consume the session transcript and merge
-# new turns into hot memory. It must NOT block the Stop hook (the current
-# synchronous work above is already on the fast path), so T13 will use
-#     nohup ... & disown
-# with stdout/stderr redirected to $VAULT/.secondbrain/ingest-log.md so the
-# user's session continues immediately after the commit.
+# After the per-turn commit lands, we run extract_new_turns.py to build a
+# context envelope at /tmp/secondbrain-stop-context-<session>.json. If the
+# envelope has any new turns, we spawn `claude --agent secondbrain-ingester`
+# in the background via `nohup ... & disown`. The ingester consumes the
+# envelope, routes new content into the vault, updates hot-memory, and
+# commits the result — all without blocking the user's session.
+#
+# Gates (any of these short-circuit the dispatch path, but NEVER crash
+# the hook):
+#
+#   - new_turns count == 0             → nothing to ingest, skip
+#   - SECONDBRAIN_SKIP_INGESTER_DISPATCH=1 → test-friendly opt-out
+#   - `claude` CLI not on PATH         → graceful degrade, log, skip
+#   - extract_new_turns.py fails       → log error, skip dispatch
+#
+# All dispatch decisions + errors append to ingest-log.md so `tail -f
+# ingest-log.md` is the single audit trail for background ingest.
 # ---------------------------------------------------------------------------
+
+# Re-parse the hook payload one more time to lift out the session id,
+# transcript path, and cwd. Doing this in its own python invocation is
+# cheap (<10ms) and keeps the Phase 2 commit block above completely
+# untouched — the Phase 2 path is load-bearing and we don't want to
+# thread new variables through it.
+SB_PHASE3_VARS="$(mktemp -t sb_on_stop_phase3.XXXXXX 2>/dev/null || echo /tmp/sb_on_stop_phase3.$$)"
+export SB_PHASE3_VARS
+
+cleanup_phase3() {
+    rm -f "${SB_PHASE3_VARS:-}" 2>/dev/null || true
+}
+# Chain onto the existing EXIT trap without clobbering cleanup_decision.
+trap 'cleanup_decision; cleanup_phase3' EXIT
+
+set +e
+python3 <<'PY'
+import json
+import os
+import sys
+
+raw = os.environ.get("SECONDBRAIN_HOOK_INPUT", "")
+out_path = os.environ.get("SB_PHASE3_VARS", "")
+
+def _write(values):
+    if not out_path:
+        return
+    try:
+        with open(out_path, "w", encoding="utf-8") as fh:
+            for line in values:
+                fh.write(line + "\n")
+    except Exception:
+        pass
+
+try:
+    payload = json.loads(raw) if raw else {}
+except Exception:
+    _write(["", "", ""])
+    sys.exit(0)
+
+if not isinstance(payload, dict):
+    _write(["", "", ""])
+    sys.exit(0)
+
+session_id = str(payload.get("session_id") or "")
+transcript_path = str(payload.get("transcript_path") or "")
+cwd_value = str(payload.get("cwd") or "")
+_write([session_id, transcript_path, cwd_value])
+PY
+set -e
+
+SESSION_ID=""
+TRANSCRIPT_PATH=""
+CWD_VALUE=""
+if [ -f "$SB_PHASE3_VARS" ]; then
+    SESSION_ID="$(sed -n '1p' "$SB_PHASE3_VARS" 2>/dev/null || echo "")"
+    TRANSCRIPT_PATH="$(sed -n '2p' "$SB_PHASE3_VARS" 2>/dev/null || echo "")"
+    CWD_VALUE="$(sed -n '3p' "$SB_PHASE3_VARS" 2>/dev/null || echo "")"
+fi
+
+# If we couldn't lift a session id, bail out of the dispatch path.
+# Everything Phase 2 needed already happened above.
+if [ -z "${SESSION_ID:-}" ]; then
+    exit 0
+fi
+
+LOG_PATH="$VAULT_PATH_RESOLVED/.secondbrain/ingest-log.md"
+# Ensure the log dir exists (Phase 2 usually created it already, but
+# belt-and-braces — dispatch runs even if Phase 2 had nothing to commit).
+mkdir -p "$(dirname "$LOG_PATH")" 2>/dev/null || true
+touch "$LOG_PATH" 2>/dev/null || true
+
+_phase3_log() {
+    local msg="$1"
+    local ts
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '%s [on-stop] %s\n' "$ts" "$msg" >> "$LOG_PATH" 2>/dev/null || true
+}
+
+# Run extract_new_turns.py to build the envelope. A failure here is
+# non-fatal — we log it and skip dispatch.
+ENVELOPE="/tmp/secondbrain-stop-context-${SESSION_ID}.json"
+EXTRACT_SCRIPT="${CLAUDE_PLUGIN_ROOT:-}/scripts/extract_new_turns.py"
+
+if [ ! -f "$EXTRACT_SCRIPT" ]; then
+    _phase3_log "extract_new_turns.py missing; skipping ingest dispatch for $SESSION_ID"
+    exit 0
+fi
+
+# Use the parsed cwd if we got one, else fall back to the vault path.
+if [ -z "${CWD_VALUE:-}" ]; then
+    CWD_VALUE="$VAULT_PATH_RESOLVED"
+fi
+
+set +e
+python3 "$EXTRACT_SCRIPT" \
+    --session "$SESSION_ID" \
+    --transcript "$TRANSCRIPT_PATH" \
+    --vault "$VAULT_PATH_RESOLVED" \
+    --cwd "$CWD_VALUE" \
+    --output "$ENVELOPE" >> "$LOG_PATH" 2>&1
+EXTRACT_RC=$?
+set -e
+
+if [ "$EXTRACT_RC" -ne 0 ]; then
+    _phase3_log "extract_new_turns failed (rc=$EXTRACT_RC) for session $SESSION_ID"
+    exit 0
+fi
+
+# Test-friendly escape hatch: SECONDBRAIN_SKIP_INGESTER_DISPATCH=1 stops
+# us from spawning the subagent even when new_turns > 0. Used by unit
+# tests that want to exercise the extract path without paying for an
+# actual background subprocess.
+if [ "${SECONDBRAIN_SKIP_INGESTER_DISPATCH:-}" = "1" ]; then
+    _phase3_log "SECONDBRAIN_SKIP_INGESTER_DISPATCH=1; skipping dispatch for $SESSION_ID"
+    exit 0
+fi
+
+# Parse the new_turns count out of the envelope. If the envelope is
+# malformed, treat it as zero and skip dispatch — the error will have
+# already been captured by extract_new_turns.py above.
+set +e
+NEW_TURNS="$(python3 -c "
+import json, sys
+try:
+    with open('$ENVELOPE', 'r', encoding='utf-8') as fh:
+        data = json.load(fh)
+    turns = data.get('new_turns', [])
+    if isinstance(turns, list):
+        print(len(turns))
+    else:
+        print(0)
+except Exception:
+    print(0)
+" 2>/dev/null)"
+set -e
+
+if [ -z "${NEW_TURNS:-}" ]; then
+    NEW_TURNS=0
+fi
+
+if [ "$NEW_TURNS" -le 0 ] 2>/dev/null; then
+    _phase3_log "no new turns for $SESSION_ID; skipping ingest dispatch"
+    exit 0
+fi
+
+# Graceful degrade: without `claude` on PATH, we can't dispatch. Log it
+# and exit cleanly — Phase 2 already committed, that's the important part.
+if ! command -v claude >/dev/null 2>&1; then
+    _phase3_log "\`claude\` CLI not on PATH; skipping ingest dispatch for $SESSION_ID ($NEW_TURNS new turns)"
+    exit 0
+fi
+
+# Dispatch the detached ingester. nohup + disown means the subprocess
+# survives the parent Stop-hook process death and the user's terminal
+# can close without aborting the ingest. stdout/stderr pipe into the
+# same ingest-log.md so the user has a single audit trail.
+DISPATCH_PROMPT="Process the secondbrain stop context envelope at $ENVELOPE. Session: $SESSION_ID."
+
+nohup claude --agent secondbrain-ingester -p "$DISPATCH_PROMPT" \
+    >> "$LOG_PATH" 2>&1 &
+disown $! 2>/dev/null || true
+
+_phase3_log "dispatched ingester for $SESSION_ID ($NEW_TURNS new turns)"
 
 exit 0

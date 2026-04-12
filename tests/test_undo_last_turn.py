@@ -216,8 +216,8 @@ class TestForbiddenActions:
 class TestCoreRule:
     def test_has_core_rule_section(self):
         content = _content()
-        # Per convention (see init/SKILL.md, session-end/SKILL.md), every
-        # skill has a "Core Rule" section at the top.
+        # Per convention (see init/SKILL.md), every skill has a "Core
+        # Rule" section at the top.
         assert "Core Rule" in content, (
             "undo-last-turn should start with a 'Core Rule' section "
             "summarizing what the skill does, per plugin convention."
