@@ -195,6 +195,6 @@ class TestAlwaysExitZero:
         r = _run_cli("--vault", str(vault))
         assert r.returncode == 0
 
-    def test_bad_vault_string_exits_zero(self, tmp_path: Path):
+    def test_bad_vault_string_exits_zero(self):
         r = _run_cli("--vault", "/definitely/not/a/path/anywhere/ever")
         assert r.returncode == 0

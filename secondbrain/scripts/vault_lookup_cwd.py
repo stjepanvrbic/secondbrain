@@ -209,7 +209,7 @@ def _find_frontmatter_match(
 
     if best is None:
         return None
-    _depth, name, fields, body = best
+    name, fields, body = best[1], best[2], best[3]
     return name, fields, body
 
 
