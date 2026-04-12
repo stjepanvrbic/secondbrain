@@ -64,6 +64,7 @@ consistently across regenerations.
 OPTIONAL_SECTIONS: List[str] = [
     "Active Project Context",   # appended by session-start hook at runtime
     "Morning Brief Status",
+    "System Alerts",            # populated by --regenerate when health issues exist
 ]
 """H2 sections that are allowed but not required. Listed here so that
 `validate` does not flag them as unknown-extra sections (which would

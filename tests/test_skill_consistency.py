@@ -88,6 +88,8 @@ DEPRECATION_DOC_ALLOWLIST: frozenset[str] = frozenset({
     # legacy file" forbidden-action. Pedagogical, not a live reference.
     # (T11 retired the session-start SKILL.md, so it's no longer listed.)
     "skills/dream-protocol/SKILL.md",
+    # doctor mentions CLAUDE.md in the legacy detection check and escalation table.
+    "skills/doctor/SKILL.md",
 })
 
 # Regex pulling `${CLAUDE_PLUGIN_ROOT}/...` (with or without `@` prefix and

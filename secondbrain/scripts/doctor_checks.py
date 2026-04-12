@@ -941,6 +941,136 @@ def check_ingest_log_recent_failures(
     )
 
 
+def check_legacy_claude_md(vault_path: Path) -> CheckResult:
+    """Check if deprecated CLAUDE.md exists at vault root."""
+    claude_md = vault_path / "CLAUDE.md"
+    if not claude_md.is_file():
+        return CheckResult(
+            name="legacy_claude_md",
+            status="pass",
+            message="no legacy CLAUDE.md at vault root",
+            fixable=False,
+        )
+    return CheckResult(
+        name="legacy_claude_md",
+        status="warning",
+        message=(
+            "Legacy CLAUDE.md at vault root — deprecated since v3.3.3. "
+            "Routing rules are now injected by the plugin. "
+            "This file may pollute agent context. Safe to delete or archive."
+        ),
+        fixable=False,
+    )
+
+
+def check_vaults_config() -> CheckResult:
+    """Check if ~/.config/secondbrain/vaults.json exists with an active vault.
+
+    Without this file, all hooks (emit-hot-memory, on-stop, session-end,
+    enforce-mcp-only) fail silently — no session logging, no per-turn
+    commits, no immutability enforcement.
+    """
+    config_path = Path.home() / ".config" / "secondbrain" / "vaults.json"
+    if not config_path.exists():
+        return CheckResult(
+            name="vaults_config",
+            status="fail",
+            message=(
+                "~/.config/secondbrain/vaults.json missing — all hooks disabled "
+                "(no session logging, no per-turn commits, no immutability enforcement). "
+                "Run /secondbrain:init to create it."
+            ),
+            fixable=True,
+            fix_function="add_vault_to_config",
+        )
+    try:
+        data = json.loads(config_path.read_text())
+        active_id = data.get("active_vault_id")
+        if not active_id:
+            return CheckResult(
+                name="vaults_config",
+                status="fail",
+                message="vaults.json exists but has no active_vault_id",
+                fixable=True,
+                fix_function="add_vault_to_config",
+            )
+    except Exception as exc:
+        return CheckResult(
+            name="vaults_config",
+            status="fail",
+            message=f"vaults.json exists but is malformed: {exc}",
+            fixable=True,
+            fix_function="add_vault_to_config",
+        )
+    return CheckResult(
+        name="vaults_config",
+        status="pass",
+        message="vaults.json has active vault configured",
+        fixable=False,
+    )
+
+
+def check_plugin_version_mismatch(plugin_root: Path) -> CheckResult:
+    """Compare installed plugin version against the source marketplace version.
+
+    Detects when Cowork's marketplace sync updated metadata but did not
+    re-extract plugin files to rpm/.
+    """
+    installed_pj = plugin_root / ".claude-plugin" / "plugin.json"
+    if not installed_pj.is_file():
+        return CheckResult(
+            name="plugin_version_mismatch",
+            status="skip",
+            message="cannot find installed plugin.json",
+            fixable=False,
+        )
+    try:
+        installed_version = json.loads(installed_pj.read_text())["version"]
+    except Exception:
+        return CheckResult(
+            name="plugin_version_mismatch",
+            status="skip",
+            message="cannot read installed plugin.json version",
+            fixable=False,
+        )
+
+    # Find the source marketplace version via the scripts directory
+    source_pj = _SCRIPTS_DIR.parent / ".claude-plugin" / "plugin.json"
+    if not source_pj.is_file():
+        return CheckResult(
+            name="plugin_version_mismatch",
+            status="skip",
+            message="cannot find source plugin.json for comparison",
+            fixable=False,
+        )
+    try:
+        source_version = json.loads(source_pj.read_text())["version"]
+    except Exception:
+        return CheckResult(
+            name="plugin_version_mismatch",
+            status="skip",
+            message="cannot read source plugin.json version",
+            fixable=False,
+        )
+
+    if installed_version == source_version:
+        return CheckResult(
+            name="plugin_version_mismatch",
+            status="pass",
+            message=f"plugin version {installed_version} matches source",
+            fixable=False,
+        )
+    return CheckResult(
+        name="plugin_version_mismatch",
+        status="warning",
+        message=(
+            f"installed plugin v{installed_version} but source is v{source_version}. "
+            f"In Cowork, try removing and reinstalling the plugin from the marketplace."
+        ),
+        fixable=False,
+    )
+
+
 def check_vault_verification(vault_path: Path) -> CheckResult:
     """Run verify_vault.py's default checks (read-only) and report counts.
 
@@ -1032,6 +1162,9 @@ def run_all_checks(
     plugin_root = plugin_root or Path(os.environ.get("CLAUDE_PLUGIN_ROOT", ""))
     results: List[CheckResult] = []
 
+    # Check 0 — vaults.json config (hooks depend on this, run first).
+    results.append(check_vaults_config())
+
     # Checks 1-5 don't need vault access.
     results.append(check_plugin_root())
     results.append(check_environment())
@@ -1095,7 +1228,7 @@ def run_all_checks(
             "manifest", "log_md", "profile", "standard_folders",
             "scheduled_tasks", "last_dream_protocol_run",
             "hot_memory_schema", "ingest_log_recent_failures",
-            "vault_verification",
+            "vault_verification", "legacy_claude_md", "plugin_version_mismatch",
         ):
             results.append(CheckResult(
                 name=name,
@@ -1128,6 +1261,10 @@ def run_all_checks(
 
         # Vault content verification (read-only). Escalates to dream-protocol.
         results.append(check_vault_verification(vault_path))
+
+        # Legacy artifact and version checks.
+        results.append(check_legacy_claude_md(vault_path))
+        results.append(check_plugin_version_mismatch(plugin_root))
 
     # Check 15 — core.hooksPath (informational, needs the secondbrain repo root).
     if repo_root is not None:

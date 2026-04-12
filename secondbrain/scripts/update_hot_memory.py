@@ -234,7 +234,37 @@ def _file_pointers_section() -> str:
     return "None yet."
 
 
-def _build_regenerated_sections(client) -> Dict[str, str]:
+def _build_system_alerts(vault_path: Optional[Path]) -> Optional[str]:
+    """Run deterministic health checks and return alerts as a bullet list.
+
+    Returns None if no issues found (section is omitted from hot-memory).
+    All checks are pure file-existence or version-comparison — zero agent
+    reasoning needed.
+    """
+    alerts: List[str] = []
+
+    if vault_path:
+        vault = Path(vault_path)
+        if (vault / "CLAUDE.md").exists():
+            alerts.append(
+                "Legacy `CLAUDE.md` at vault root — deprecated since v3.3.3, "
+                "may pollute agent context. Safe to delete or archive."
+            )
+
+    vaults_config = Path.home() / ".config" / "secondbrain" / "vaults.json"
+    if not vaults_config.exists():
+        alerts.append(
+            "`vaults.json` missing — session hooks disabled (no session logging, "
+            "no per-turn commits, no immutability enforcement). "
+            "Run `/secondbrain:init` or `/secondbrain:doctor` to fix."
+        )
+
+    if not alerts:
+        return None
+    return "\n".join(f"- {a}" for a in alerts)
+
+
+def _build_regenerated_sections(client, vault_path: Optional[Path] = None) -> Dict[str, str]:
     """Query the vault and build a sections dict.
 
     Missing source files are tolerated — the corresponding section gets a
@@ -246,7 +276,7 @@ def _build_regenerated_sections(client) -> Dict[str, str]:
     deadlines = _read_optional(client, SOURCE_DEADLINES)
     log = _read_optional(client, SOURCE_LOG)
 
-    return {
+    sections = {
         "Identity & Directive": _identity_section(),
         "User Snapshot": _user_snapshot_section(profile),
         "Top Deadlines": _extract_deadlines(deadlines),
@@ -257,18 +287,25 @@ def _build_regenerated_sections(client) -> Dict[str, str]:
         "File Pointers": _file_pointers_section(),
     }
 
+    # System Alerts: populated when critical health issues exist, omitted when clean.
+    alerts_body = _build_system_alerts(vault_path)
+    if alerts_body:
+        sections["System Alerts"] = alerts_body
+
+    return sections
+
 
 # ---------------------------------------------------------------------------
 # Mode implementations
 # ---------------------------------------------------------------------------
 
-def _run_regenerate(client) -> int:
+def _run_regenerate(client, vault_path: Optional[Path] = None) -> int:
     """Build + validate + write a fresh hot-memory.md.
 
     Returns 0 on success, 1 on validation failure. Network errors
     propagate to `main` as ConnectMCPError subclasses and are handled there.
     """
-    sections = _build_regenerated_sections(client)
+    sections = _build_regenerated_sections(client, vault_path=vault_path)
     doc = assemble_document(
         sections,
         generated_by="update_hot_memory.py --regenerate",
@@ -506,7 +543,7 @@ def main(
 
     try:
         if args.regenerate:
-            return _run_regenerate(client)
+            return _run_regenerate(client, vault_path=Path(args.vault) if args.vault else None)
         return _run_apply(client, Path(args.apply))
     except ConnectMCPUnreachable as exc:
         sys.stderr.write("error: Connect MCP unreachable: " + str(exc) + "\n")

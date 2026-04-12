@@ -47,12 +47,19 @@ logic in this skill body; always call the CLI.
 
 # Phase 1 — Diagnose (Turn 1)
 
+FORBIDDEN: Skipping `doctor_cli.py`. You MUST run the CLI command below
+BEFORE doing any manual MCP checks. The CLI runs all programmatic checks
+including vault verification, legacy CLAUDE.md detection, vaults.json
+validation, and plugin version mismatch detection. Manual MCP checks
+(vault identity cross-check, scheduled tasks) SUPPLEMENT the CLI output —
+they do NOT replace it.
+
 On the first invocation in a session, doctor **MUST NOT make any changes**.
 It **MUST** print the diagnostic report, end with the "want me to fix?"
 question, and then **STOP**.
 
 1. Run `doctor_cli.py --diagnose --vault "${VAULT_PATH}"` via the `Bash`
-   tool. Collect stdout.
+   tool. Collect stdout. This is MANDATORY — do not skip this step.
 2. **Additionally, from inside the agent session**, run the two checks
    doctor_cli.py cannot do on its own:
    - **Vault identity cross-check (Check 6.5):** read `.secondbrain-installed`
@@ -91,6 +98,7 @@ question, and then **STOP**.
 | `profile` (Check 10, placeholders or missing) | `setup_profile` |
 | `standard_folders` (Check 11, folders missing) | `setup_vault_scaffolding` |
 | `vault_identity_cross` (marker present but missing `vault_id` field) | `write_vault_id` |
+| `vaults_config` (Check 0, vaults.json missing/broken) | `add_vault_to_config` |
 
 **Escalation-only (doctor CANNOT fix — tell the user):**
 
@@ -110,6 +118,8 @@ question, and then **STOP**.
 | `hot_memory_schema` (Check 14, invalid) | run `/secondbrain:dream-protocol` to rebuild `brain/hot-memory.md` from scratch |
 | `ingest_log_recent_failures` (Check 16, warning) | investigate the specific failures listed |
 | `vault_verification` (Check 18) | run `/secondbrain:dream-protocol` to fix vault errors (wikilinks, inbox archiving, orphans) |
+| `legacy_claude_md` (Check 19, warning) | delete or archive `CLAUDE.md` at vault root — deprecated since v3.3.3, may pollute agent context |
+| `plugin_version_mismatch` (Check 20, warning) | in Cowork, remove and reinstall the plugin from the marketplace |
 
 # Phase 2 — Treat (Turn 2, ONLY on confirmation)
 

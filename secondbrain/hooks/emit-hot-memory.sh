@@ -107,6 +107,12 @@ CWD_PAYLOAD="${RESOLVED#*$'\t'}"
 # something is up and exit 0.
 # ---------------------------------------------------------------------------
 
+# Fallback: if vaults.json didn't resolve a vault, check if the cwd
+# contains _MANIFEST.md (common in Cowork where the workspace IS the vault).
+if [ -z "${ACTIVE_VAULT}" ] && [ -n "${CWD_PAYLOAD}" ] && [ -f "${CWD_PAYLOAD}/_MANIFEST.md" ]; then
+    ACTIVE_VAULT="${CWD_PAYLOAD}"
+fi
+
 if [ -z "${ACTIVE_VAULT}" ]; then
     printf '%s\n' '{"systemMessage": "secondbrain not configured. Run /secondbrain:init to set up."}'
     exit 0

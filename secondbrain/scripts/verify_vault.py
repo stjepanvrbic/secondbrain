@@ -871,6 +871,34 @@ class Reporter:
         return 1 if totals["error"] + totals["warning"] > 0 else 0
 
 
+class LegacyCLAUDEMDChecker:
+    """Flag deprecated CLAUDE.md at vault root."""
+
+    NAME = "legacy-claude-md"
+
+    def run(self, index: VaultIndex) -> CheckResult:
+        claude_md = index.vault_root / "CLAUDE.md"
+        if not claude_md.is_file():
+            return CheckResult(name=self.NAME, issues=[], stats={})
+        return CheckResult(
+            name=self.NAME,
+            issues=[Issue(
+                check=self.NAME,
+                severity="warning",
+                file="CLAUDE.md",
+                line=0,
+                message=(
+                    "Legacy CLAUDE.md at vault root — deprecated since v3.3.3. "
+                    "Routing rules are now injected by the plugin via hot-memory. "
+                    "This file may pollute agent context. Safe to delete or "
+                    "archive to archive/CLAUDE.md."
+                ),
+                suggestion="Delete or archive to archive/CLAUDE.md",
+            )],
+            stats={},
+        )
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -886,9 +914,10 @@ ALL_CHECKERS = {
     "conflicts": SyncthingConflictDetector,
     "structure": StructureChecker,
     "suggestions": UnconvertedReferenceChecker,
+    "legacy-claude-md": LegacyCLAUDEMDChecker,
 }
 
-DEFAULT_CHECKS = {"wikilinks", "metadata", "duplicates", "manifest", "inbox", "entity-stubs", "orphans", "conflicts", "structure"}
+DEFAULT_CHECKS = {"wikilinks", "metadata", "duplicates", "manifest", "inbox", "entity-stubs", "orphans", "conflicts", "structure", "legacy-claude-md"}
 
 
 def build_parser() -> argparse.ArgumentParser:
