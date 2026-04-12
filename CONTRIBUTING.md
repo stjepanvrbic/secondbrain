@@ -60,13 +60,17 @@ Looking for first issues? These are good entry points:
 
 ## Releasing
 
-One command: `python3 secondbrain/scripts/bump_version.py --release`
+**Fully automatic.** Just `git push`. The pre-push hook handles everything:
 
-This bumps all version files, stages, commits, and creates an annotated git tag. Then `git push` carries everything (tags are pushed automatically via `push.followTags`). GitHub Actions creates a GitHub Release when the tag arrives.
+1. If the current version already has a tag (meaning no version bump was done), the hook auto-bumps the patch version, commits, and tags. The push aborts — run `git push` again to include the bump.
+2. If the version was manually bumped but not tagged, the hook auto-creates the tag. Push again.
+3. If everything is already in order, the push goes through.
 
-The pre-push hook blocks if you skip this — it enforces that a tag `v{version}` exists and is reachable from HEAD.
+`push.followTags` is configured automatically (via `install_git_hooks.py`) so tags are carried with the push. GitHub Actions creates a GitHub Release when the tag arrives.
 
-**Why this matters:** Cowork's server-managed marketplace relies on git tags and GitHub releases to detect plugin updates. Versions without tags are invisible to Cowork. This pipeline ensures every push has a corresponding tag and release.
+**Manual override:** `python3 secondbrain/scripts/bump_version.py --release` does bump + commit + tag in one shot if you prefer to control the version number (e.g., `--release 4.0.0` for a major bump).
+
+**Why this matters:** Cowork's server-managed marketplace relies on git tags and GitHub releases to detect plugin updates. Versions without tags are invisible to Cowork. The pre-push hook ensures every push has a corresponding tag — no manual steps to forget.
 
 ---
 

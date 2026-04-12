@@ -7,18 +7,22 @@
 # `core.hooksPath = .githooks`. If you see this hook not running, core.hooksPath
 # is probably not set for your clone.
 #
-# What this hook refuses to allow:
+# What this hook enforces:
 #   1. version drift        — plugin.json / marketplace.json metadata.version / plugins[].version / SKILL.md all in lockstep
-#   2. stale version        — current version must be >= last git tag (passes if matching tag exists)
-#   3. missing version tag  — annotated tag v{version} must exist and be reachable from HEAD
-#   4. manifest breakage    — test_plugin_manifest.py must pass
-#   5. any failing test     — the full pytest suite must pass
+#   2. auto version bump    — if version == last tag (no manual bump), auto-bump patch + commit + tag
+#   3. auto tag creation    — if version > last tag but no tag, auto-create tag
+#   4. manifest health      — test_plugin_manifest.py must pass
+#   5. full test suite      — all tests must pass
+#
+# AUTO-REMEDIATION: Gates 2-3 auto-fix missing bumps/tags by running
+# bump_version.py --release, then abort so `git push` can be re-run with
+# the new commit + tag included. This means `git push` is the ONLY command
+# the developer needs. If it aborts, just run `git push` again.
 #
 # What this hook must NOT do:
 #   - NEVER `git commit --amend` during push. The old hook did that, which caused
 #     a non-fast-forward push, which caused a force-push, which wedged every
-#     shallow marketplace clone downstream. If the version wasn't bumped, REFUSE
-#     the push and tell the human to bump manually.
+#     shallow marketplace clone downstream.
 #   - NEVER pass `--no-verify` in any nested git call.
 #   - NEVER skip tests under time pressure.
 
@@ -66,56 +70,60 @@ if ! python3 "$BUMP_SCRIPT" --check; then
 fi
 
 # -------------------------------------------------------------------------
-# 2. Version must be >= last tag (with tag for current version required)
+# 2-3. Auto-bump and auto-tag: ensure a tagged release exists
 # -------------------------------------------------------------------------
-bold "pre-push: [2/5] version-beyond-last-tag check"
+bold "pre-push: [2/5] version & tag check"
 CURRENT_VERSION=$(python3 -c 'import json,sys; print(json.load(open("'"$PLUGIN_ROOT"'/.claude-plugin/plugin.json"))["version"])')
 EXPECTED_TAG="v$CURRENT_VERSION"
 LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
 
+# Determine if we need to auto-remediate
+NEEDS_BUMP=false
+NEEDS_TAG=false
+
 if [ -n "$LAST_TAG" ]; then
     TAG_CLEAN="${LAST_TAG#v}"
-    # If the current version has a matching tag reachable from HEAD, the
-    # version-vs-tag relationship is satisfied (we're on the tagged release).
-    # Only require strict > when there's no matching tag.
-    if git tag -l "$EXPECTED_TAG" | grep -q . && \
-       git merge-base --is-ancestor "$(git rev-list -n 1 "$EXPECTED_TAG")" HEAD 2>/dev/null; then
-        green "pre-push: version $CURRENT_VERSION has matching tag $EXPECTED_TAG"
-    elif ! python3 - "$CURRENT_VERSION" "$TAG_CLEAN" <<'PY'
-import sys
-def parse(v): return tuple(int(x) for x in v.split("."))
-cur = parse(sys.argv[1])
-tag = parse(sys.argv[2])
-sys.exit(0 if cur > tag else 1)
-PY
-    then
-        fail "plugin version $CURRENT_VERSION is not strictly greater than last tag $LAST_TAG" \
-            "Release with:" \
-            "    python3 secondbrain/scripts/bump_version.py --release"
-    else
-        green "pre-push: version $CURRENT_VERSION > tag $LAST_TAG"
+
+    # Case 1: version == last tag → no manual bump was done, auto-bump needed
+    if [ "$CURRENT_VERSION" = "$TAG_CLEAN" ]; then
+        NEEDS_BUMP=true
     fi
-else
-    green "pre-push: no tags yet, skipping tag-beyond check"
 fi
 
-# -------------------------------------------------------------------------
-# 3. Tag for current version must exist
-# -------------------------------------------------------------------------
-bold "pre-push: [3/5] version tag exists"
+# Case 2: version has no matching tag → tag needed
 if ! git tag -l "$EXPECTED_TAG" | grep -q .; then
-    fail "no tag $EXPECTED_TAG for current version $CURRENT_VERSION" \
-        "Release with:" \
-        "    python3 secondbrain/scripts/bump_version.py --release"
+    NEEDS_TAG=true
 fi
-TAG_COMMIT=$(git rev-list -n 1 "$EXPECTED_TAG")
-if ! git merge-base --is-ancestor "$TAG_COMMIT" HEAD; then
-    fail "tag $EXPECTED_TAG exists but points to commit $TAG_COMMIT which is not reachable from HEAD" \
-        "Delete and recreate:" \
-        "    git tag -d $EXPECTED_TAG" \
-        "    python3 secondbrain/scripts/bump_version.py --tag"
+
+# Case 3: tag exists but not reachable from HEAD → stale tag, re-tag needed
+if [ "$NEEDS_TAG" = "false" ]; then
+    TAG_COMMIT=$(git rev-list -n 1 "$EXPECTED_TAG")
+    if ! git merge-base --is-ancestor "$TAG_COMMIT" HEAD 2>/dev/null; then
+        bold "pre-push: tag $EXPECTED_TAG is stale (not reachable from HEAD), deleting"
+        git tag -d "$EXPECTED_TAG" >/dev/null 2>&1
+        NEEDS_TAG=true
+    fi
 fi
-green "pre-push: tag $EXPECTED_TAG exists and is reachable from HEAD"
+
+# Auto-remediate: bump + tag, or just tag
+if [ "$NEEDS_BUMP" = "true" ]; then
+    bold "pre-push: auto-bumping patch version (current $CURRENT_VERSION == last tag $LAST_TAG)"
+    python3 "$BUMP_SCRIPT" --release
+    NEW_VERSION=$(python3 -c 'import json,sys; print(json.load(open("'"$PLUGIN_ROOT"'/.claude-plugin/plugin.json"))["version"])')
+    bold ""
+    bold "pre-push: auto-bumped $CURRENT_VERSION -> $NEW_VERSION and tagged v$NEW_VERSION"
+    bold "pre-push: run 'git push' again to include the version bump"
+    exit 1
+elif [ "$NEEDS_TAG" = "true" ]; then
+    bold "pre-push: auto-creating tag $EXPECTED_TAG for current version"
+    python3 "$BUMP_SCRIPT" --tag
+    bold ""
+    bold "pre-push: created tag $EXPECTED_TAG"
+    bold "pre-push: run 'git push' again to include the tag"
+    exit 1
+else
+    green "pre-push: version $CURRENT_VERSION has matching tag $EXPECTED_TAG"
+fi
 
 # -------------------------------------------------------------------------
 # 4. Full plugin-manifest health check
