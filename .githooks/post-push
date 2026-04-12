@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 #
-# post-push: create a GitHub release after the tag lands on the remote.
+# post-push: create a GitHub release and clean up old releases/tags.
 #
 # Spawned as a background process by pre-push. Polls for the tag on the
-# remote (up to 60s), then creates a release with auto-generated notes.
-# If the push failed or the tag never appears, times out silently.
+# remote (up to 60s), creates a release, then deletes ALL older releases
+# and tags so only the latest exists. This forces Cowork's marketplace
+# to update directly to the latest version instead of stepping through
+# each intermediate release.
 #
 # Requirements: `gh` CLI authenticated. If `gh` is not on PATH, exits
 # quietly — the push already succeeded, the release is a nice-to-have.
@@ -22,14 +24,35 @@ if ! command -v gh >/dev/null 2>&1; then
 fi
 
 # Poll for the tag on the remote (max 60s, check every 3s)
+LANDED=false
 for _ in $(seq 1 20); do
     sleep 3
     if gh api "repos/{owner}/{repo}/git/refs/tags/$TAG" >/dev/null 2>&1; then
-        # Tag is on remote — create the release
-        gh release create "$TAG" --generate-notes --title "$TAG" 2>/dev/null || true
-        exit 0
+        LANDED=true
+        break
     fi
 done
 
-# Timed out — tag never appeared (push may have failed). Silent exit.
+if [ "$LANDED" != "true" ]; then
+    exit 0
+fi
+
+# Create the new release
+gh release create "$TAG" --generate-notes --title "$TAG" 2>/dev/null || true
+
+# Delete all older releases (keep only the one we just created)
+gh release list --json tagName --jq '.[].tagName' 2>/dev/null | while read -r OLD_TAG; do
+    if [ "$OLD_TAG" != "$TAG" ]; then
+        gh release delete "$OLD_TAG" --yes 2>/dev/null || true
+    fi
+done
+
+# Delete all older tags from remote (keep only the current one)
+git tag -l 2>/dev/null | while read -r OLD_TAG; do
+    if [ "$OLD_TAG" != "$TAG" ]; then
+        git push origin --delete "$OLD_TAG" 2>/dev/null || true
+        git tag -d "$OLD_TAG" 2>/dev/null || true
+    fi
+done
+
 exit 0
