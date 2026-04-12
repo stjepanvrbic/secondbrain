@@ -147,4 +147,16 @@ if ! python3 -m pytest "$TESTS_DIR" -q --no-header; then
 fi
 
 green "pre-push: all checks passed — push allowed"
+
+# -------------------------------------------------------------------------
+# Post-push: spawn background release creation.
+# The post-push script polls for the tag on the remote, then creates a
+# GitHub release. Runs detached so git push isn't blocked.
+# -------------------------------------------------------------------------
+POST_PUSH="$REPO_ROOT/.githooks/post-push"
+if [ -x "$POST_PUSH" ] && [ -n "${CURRENT_VERSION:-}" ]; then
+    nohup "$POST_PUSH" "v$CURRENT_VERSION" >/dev/null 2>&1 &
+    disown $! 2>/dev/null || true
+fi
+
 exit 0

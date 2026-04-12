@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+#
+# post-push: create a GitHub release after the tag lands on the remote.
+#
+# Spawned as a background process by pre-push. Polls for the tag on the
+# remote (up to 60s), then creates a release with auto-generated notes.
+# If the push failed or the tag never appears, times out silently.
+#
+# Requirements: `gh` CLI authenticated. If `gh` is not on PATH, exits
+# quietly — the push already succeeded, the release is a nice-to-have.
+
+set -euo pipefail
+
+TAG="${1:-}"
+if [ -z "$TAG" ]; then
+    exit 0
+fi
+
+# gh must be available
+if ! command -v gh >/dev/null 2>&1; then
+    exit 0
+fi
+
+# Poll for the tag on the remote (max 60s, check every 3s)
+for _ in $(seq 1 20); do
+    sleep 3
+    if gh api "repos/{owner}/{repo}/git/refs/tags/$TAG" >/dev/null 2>&1; then
+        # Tag is on remote — create the release
+        gh release create "$TAG" --generate-notes --title "$TAG" 2>/dev/null || true
+        exit 0
+    fi
+done
+
+# Timed out — tag never appeared (push may have failed). Silent exit.
+exit 0

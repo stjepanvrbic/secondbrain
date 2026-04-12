@@ -26,7 +26,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOKS_DIR = REPO_ROOT / ".githooks"
-EXPECTED_HOOKS = ["pre-push"]
+EXPECTED_HOOKS = ["pre-push", "post-push"]
 
 
 def git(*args: str) -> str:
