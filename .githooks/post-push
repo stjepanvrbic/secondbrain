@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 #
-# post-push: create a GitHub release and clean up old releases/tags.
+# post-push: create a GitHub release and demote old releases.
 #
 # Spawned as a background process by pre-push. Polls for the tag on the
-# remote (up to 60s), creates a release, then deletes ALL older releases
-# and tags so only the latest exists. This forces Cowork's marketplace
-# to update directly to the latest version instead of stepping through
-# each intermediate release.
+# remote, creates a release marked as "Latest", then demotes all older
+# releases so /releases/latest always returns only the newest version.
+# Release history is preserved — nothing is deleted.
 #
 # Requirements: `gh` CLI authenticated. If `gh` is not on PATH, exits
 # quietly — the push already succeeded, the release is a nice-to-have.
@@ -37,21 +36,15 @@ if [ "$LANDED" != "true" ]; then
     exit 0
 fi
 
-# Create the new release
-gh release create "$TAG" --generate-notes --title "$TAG" 2>/dev/null || true
+# Create the new release, explicitly marked as Latest
+gh release create "$TAG" --generate-notes --title "$TAG" --latest 2>/dev/null || true
 
-# Delete all older releases (keep only the one we just created)
+# Demote all older releases so only the new one is "Latest".
+# This preserves release history while ensuring /releases/latest
+# returns only the newest version.
 gh release list --json tagName --jq '.[].tagName' 2>/dev/null | while read -r OLD_TAG; do
     if [ "$OLD_TAG" != "$TAG" ]; then
-        gh release delete "$OLD_TAG" --yes 2>/dev/null || true
-    fi
-done
-
-# Delete all older tags from remote (keep only the current one)
-git tag -l 2>/dev/null | while read -r OLD_TAG; do
-    if [ "$OLD_TAG" != "$TAG" ]; then
-        git push origin --delete "$OLD_TAG" 2>/dev/null || true
-        git tag -d "$OLD_TAG" 2>/dev/null || true
+        gh release edit "$OLD_TAG" --latest=false 2>/dev/null || true
     fi
 done
 
