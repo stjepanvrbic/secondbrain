@@ -8,7 +8,7 @@ description: >
   confirmation invokes the treatment phase (Phase 2) to auto-fix
   issues. Phase 1 never mutates anything.
 metadata:
-  version: "3.5.5"
+  version: "3.5.6"
 ---
 
 # Core Rule
