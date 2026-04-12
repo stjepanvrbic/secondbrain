@@ -3,168 +3,200 @@ name: doctor
 description: >
   This skill should be used when the user asks "what's wrong with my
   secondbrain", "is everything working", "diagnose my setup", "fix my
-  vault", or "secondbrain not working". Runs a 13-point diagnostic and
-  reports pass/fail with specific fix commands for each issue. Read-only —
-  never modifies anything.
+  vault", or "secondbrain not working". Runs a read-only diagnostic
+  (Phase 1), reports results, and ONLY on the user's next-turn
+  confirmation invokes the treatment phase (Phase 2) to auto-fix
+  issues. Phase 1 never mutates anything.
 metadata:
-  version: "3.3.0"
+  version: "3.5.0"
 ---
 
 # Core Rule
 
-Run a comprehensive read-only diagnostic of the secondbrain plugin install. For each check, report pass/fail with a SPECIFIC fix command if it fails. Never modify anything — `doctor` is purely diagnostic. The primary diagnostic tool is `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "${VAULT_PATH}" --json`. If the user wants automatic repair, send them to `/secondbrain:init` (which IS allowed to write).
+Doctor is a **two-turn diagnose-then-treat** flow:
+
+- **Turn 1 (Phase 1 — diagnose):** strictly read-only. Run all checks,
+  print the report, end with "I can fix N of these — want me to? (yes/no)",
+  and **STOP**. Do not run any tool that could modify state. Do not call
+  any fix function. Do not assume consent. Wait for the user's next turn.
+- **Turn 2 (Phase 2 — treat):** runs **only** if the user replies with
+  explicit confirmation on the next turn (yes / sure / do it / fix it).
+  If the user says no, or the reply is ambiguous, doctor must NOT treat.
+
+The primary tool for Phase 1 is:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --diagnose --vault "${VAULT_PATH}"
+```
+
+The primary tool for Phase 2 is:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --treat --vault "${VAULT_PATH}"
+```
+
+Both modes are implemented by the tested Python module
+`secondbrain/scripts/doctor_checks.py`, invoked through the thin CLI
+wrapper `secondbrain/scripts/doctor_cli.py`. Do not re-implement check
+logic in this skill body; always call the CLI.
 
 # Prerequisites
 
 1. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
-3. For environment-specific paths, read `@${CLAUDE_PLUGIN_ROOT}/references/environments.md`.
+2. For environment-specific paths, read `@${CLAUDE_PLUGIN_ROOT}/references/environments.md`.
 
-# Execution
+# Phase 1 — Diagnose (Turn 1)
 
-Run all 13 checks in order. Don't stop on the first failure — collect all results and report at the end.
+On the first invocation in a session, doctor **MUST NOT make any changes**.
+It **MUST** print the diagnostic report, end with the "want me to fix?"
+question, and then **STOP**.
 
-## Check 1: Plugin install location
+1. Run `doctor_cli.py --diagnose --vault "${VAULT_PATH}"` via the `Bash`
+   tool. Collect stdout.
+2. **Additionally, from inside the agent session**, run the two checks
+   doctor_cli.py cannot do on its own:
+   - **Vault identity cross-check (Check 6.5):** read `.secondbrain-installed`
+     via the filesystem at `${VAULT_PATH}`, then read the same file via
+     `mcp__obsidian__vault_read`. Compare the `vault_id` field. If they
+     match, report pass. If they don't, LOUDLY report the mismatch — this
+     is a config conflict, not a fix target. Tell the user to reconcile
+     VAULT_PATH vs the open Obsidian vault.
+   - **Scheduled tasks (Check 12):** call `CronList` (Code) or inspect
+     `<workspace>/.scheduled-tasks/` (Cowork) and verify the 6 bundled
+     tasks are registered. Report count.
+3. Print the full report combining both sources. Summarize as:
 
-- Verify `${CLAUDE_PLUGIN_ROOT}` is defined and resolves to a real directory
-- If failing: the plugin is not properly installed. Fix: `/plugin install stjepanvrbic/secondbrain` (Code) or re-upload the plugin ZIP (Cowork)
+   ```
+   Result: X passed, Y failed, Z warning, W skipped.
+   ```
 
-## Check 2: Environment detection
+4. If any failure is fixable by doctor's Phase 2, end with:
 
-- Probe `CronList` to detect Code vs Cowork
-- Always passes (informational only) — print "Environment: Claude Code" or "Environment: Claude Cowork"
+   ```
+   I can fix N of these — want me to? (yes/no)
+   ```
 
-## Check 3: `OBSIDIAN_API_KEY` env var
+   If nothing is auto-fixable, end with a list of manual actions for each
+   failure. In both cases, **STOP**. Do NOT proceed to Phase 2 on the same
+   turn.
 
-- Check whether the env var is set and non-empty
-- If failing: "OBSIDIAN_API_KEY is not set. Run /secondbrain:init to set it, or add `export OBSIDIAN_API_KEY=\"<key>\"` to your shell config (~/.zshrc on Mac with zsh, ~/.bashrc on Linux)."
+## Checks doctor runs in Phase 1
 
-## Check 4: `OBSIDIAN_MCP_PORT` env var
+**Auto-fixable (doctor CAN fix in Phase 2):**
 
-- Check whether the env var is set and non-empty
-- If failing: "OBSIDIAN_MCP_PORT is not set. The plugin's .mcp.json depends on it. Run /secondbrain:init to set it, or add `export OBSIDIAN_MCP_PORT=\"27124\"` (or whatever port your Connect MCP plugin is using) to your shell config."
+| Check | Fix function |
+|-------|--------------|
+| `manifest` (Check 8, `_MANIFEST.md` missing) | `rebuild_manifest` |
+| `log_md` (Check 9, `log.md` missing) | `create_log_md` |
+| `profile` (Check 10, placeholders or missing) | `setup_profile` |
+| `standard_folders` (Check 11, folders missing) | `setup_vault_scaffolding` |
+| `vault_identity_cross` (marker present but missing `vault_id` field) | `write_vault_id` |
 
-## Check 5: Obsidian process running
+**Escalation-only (doctor CANNOT fix — tell the user):**
 
-- Best-effort check (e.g., `pgrep -i obsidian` or check for the app via `ps`)
-- If failing: "Obsidian is not running. Open /Applications/Obsidian.app and try again."
+| Check | Escalation |
+|-------|-----------|
+| `plugin_root` (Check 1) | `/plugin install stjepanvrbic/secondbrain` |
+| `obsidian_api_key` (Check 3, env var missing) | run `/secondbrain:init` to obtain and write a key, or set `OBSIDIAN_API_KEY` manually in your shell config |
+| `obsidian_mcp_port` (Check 4, env var missing) | run `/secondbrain:init` to configure, or `export OBSIDIAN_MCP_PORT="27124"` manually |
+| `obsidian_running` (Check 5) | open `/Applications/Obsidian.app` |
+| `mcp_connection` (Check 6) | check the Connect MCP plugin is enabled in Obsidian |
+| `vault_identity_cross` MISMATCH (Check 6.5) | reconcile `VAULT_PATH` vs the open Obsidian vault — this is a config conflict, NOT a fix target |
+| `vault_identity_cross` MARKER MISSING (Check 6.5) | run `/secondbrain:init` — doctor cannot create the marker from scratch, only init can |
+| `scheduled_tasks` (Check 12) | run `/secondbrain:init` to install tasks |
+| `last_dream_protocol_run` (Check 13, warning) | run `/secondbrain:dream-protocol` manually |
+| `core_hooks_path` (Check 15) | run `python3 secondbrain/scripts/install_git_hooks.py` from the repo |
+| `hot_memory_schema` (Check 14, missing) | run `/secondbrain:dream-protocol` to regenerate `brain/hot-memory.md`, or `/secondbrain:init` if the vault has never been set up |
+| `hot_memory_schema` (Check 14, invalid) | run `/secondbrain:dream-protocol` to rebuild `brain/hot-memory.md` from scratch |
+| `ingest_log_recent_failures` (Check 16, warning) | investigate the specific failures listed |
 
-## Check 6: MCP connection (Connect MCP reachable)
+# Phase 2 — Treat (Turn 2, ONLY on confirmation)
 
-- Try `mcp__obsidian__vault_list` with path `/`
-- If failing: print the actual error and a specific fix:
-  - Connection refused → Obsidian not running, or wrong port
-  - 401/403 → API key wrong
-  - Timeout → firewall or wrong port
+Phase 2 runs **only** if the user's next-turn reply is explicit
+confirmation: "yes", "sure", "fix it", "do it", "go ahead", or similar.
+If the reply is "no", silence, or anything ambiguous, doctor must NOT
+treat — report the Phase 1 results again and let the user decide.
 
-## Check 7: Vault path reachable
+On confirmation:
 
-- Once Check 6 passes, confirm the vault has at least one file (i.e., the connection is to a real vault, not an empty one)
-- If failing: "MCP connects but the vault appears empty. Make sure the vault you opened in Obsidian has at least one Markdown file. If you just installed, run /secondbrain:init to scaffold the structure."
+1. Run `doctor_cli.py --treat --vault "${VAULT_PATH}"` via `Bash`.
+2. The CLI internally re-runs the diagnostic, invokes each fixable
+   check's `fix_function` from `setup_steps`, and re-runs the diagnostic
+   one more time to show the post-treatment state.
+3. Read the CLI's stdout and report to the user: which fixes ran, which
+   succeeded, which failed, and the new diagnostic state.
+4. For any remaining failures after Phase 2, escalate to the user with
+   the appropriate manual action from the escalation table above.
 
-## Check 8: `_MANIFEST.md` exists in vault
+## What Phase 2 does NOT do
 
-- Try `mcp__obsidian__vault_read` on `_MANIFEST.md`
-- If failing: "The vault is missing _MANIFEST.md. Run /secondbrain:dream-protocol to rebuild it, or /secondbrain:init for a full setup if this is a fresh vault."
-
-## Check 9: `CLAUDE.md` exists in vault
-
-- Try `mcp__obsidian__vault_read` on `CLAUDE.md`
-- If failing: "The vault is missing CLAUDE.md. Run /secondbrain:init to create it from the template."
-
-## Check 10: `log.md` exists in vault
-
-- Try `mcp__obsidian__vault_read` on `log.md`
-- If failing: "The vault is missing log.md (the append-only audit trail). Run /secondbrain:init to create it, or manually create an empty log.md at the vault root."
-
-## Check 11: `me/profile.md` has user content (not template placeholders)
-
-- Read `me/profile.md` and check for `{{USER_NAME}}` or similar placeholder
-- If still has placeholders: "Profile has not been filled in yet. Run /secondbrain:init to walk through profile setup."
-
-## Check 12: Standard folders present
-
-- Check existence of: `brain/`, `entities/`, `inbox/`, `me/`, `archive/`
-- For each missing: list it. Fix: "Run /secondbrain:dream-protocol or /secondbrain:init to create missing structure."
-
-## Check 13: Scheduled tasks registered
-
-- **Code:** Call `CronList` and check that all 6 bundled tasks (or whatever subset the user opted into) are registered
-- **Cowork:** Look for `<workspace>/.scheduled-tasks/` and check the SKILL.md files exist
-- If any are missing: list them. Fix: "Run /secondbrain:init to install missing scheduled tasks."
-
-## Check 14 (bonus): Last dream-protocol run successful
-
-- Read the last few lines of `log.md`
-- Find the most recent `dream-protocol` entry
-- Check whether the entry text contains "issues" or "errors" — if so, the run had problems
-- If no dream-protocol entries at all: "No dream-protocol runs in log.md. Either init was never run, or dream-protocol has never fired (it normally runs at 2am nightly)."
-- If most recent run had issues: "Most recent dream-protocol run reported issues: <quote>. Run /secondbrain:dream-protocol manually and check the output."
-
-# Output Format
-
-Print a clear table at the end with all results:
-
-```
-secondbrain doctor report:
-
-  ✓ Plugin install location
-  ✓ Environment: Claude Code
-  ✓ OBSIDIAN_API_KEY set
-  ✗ OBSIDIAN_MCP_PORT not set
-       Fix: add 'export OBSIDIAN_MCP_PORT="27124"' to ~/.zshrc, then source it
-  ✓ Obsidian process running
-  ✗ MCP connection failed (port 27124 connection refused)
-       Fix: make sure Obsidian is open AND the Connect MCP plugin is enabled
-  - Vault reachable: SKIPPED (MCP connection must work first)
-  - _MANIFEST.md exists: SKIPPED
-  - CLAUDE.md exists: SKIPPED
-  - log.md exists: SKIPPED
-  - me/profile.md has user content: SKIPPED
-  - Standard folders present: SKIPPED
-  - Scheduled tasks registered: SKIPPED (cannot check without MCP)
-  - Last dream-protocol run: SKIPPED
-
-  Result: 4 passed, 2 failed, 8 skipped (downstream of failures).
-
-  Recommended action: Fix the failing checks above (start with the
-  shell config), then run /secondbrain:doctor again.
-```
-
-For passing setups:
-
-```
-secondbrain doctor report:
-
-  ✓ Plugin install location
-  ✓ Environment: Claude Code
-  ✓ OBSIDIAN_API_KEY set
-  ✓ OBSIDIAN_MCP_PORT set (27124)
-  ✓ Obsidian process running
-  ✓ MCP connection works
-  ✓ Vault reachable (143 files)
-  ✓ _MANIFEST.md exists (last rebuilt 2026-04-09 02:00)
-  ✓ CLAUDE.md exists
-  ✓ log.md exists (latest entry: 2026-04-09 02:00 dream-protocol)
-  ✓ me/profile.md exists with user content
-  ✓ All standard folders present (brain, entities, inbox, me, archive)
-  ✓ 6 scheduled tasks registered (CronList confirms)
-  ✓ Last dream-protocol run: 2026-04-09 02:00 (clean, no issues)
-
-  Result: 14/14 checks passed. Your secondbrain is healthy.
-```
-
-# Implementation Notes
-
-- This skill is **read-only** — never write, never delete, never run `chmod`
-- If a downstream check depends on an upstream one that failed, mark it SKIPPED with a note (don't try to run it)
-- Each fix command should be specific and copy-pasteable
-- The user can run this skill anytime — it has zero side effects
-- This skill is a great first thing to suggest when a user reports any issue with the plugin
+- Phase 2 NEVER installs Obsidian or the secondbrain plugin. That's the
+  init skill's job.
+- Phase 2 NEVER registers scheduled tasks — scheduled-task registration
+  requires the agent session to call `CronCreate` directly, and the CLI
+  subprocess can't do that.
+- Phase 2 NEVER writes environment variables to the user's shell config.
+  `OBSIDIAN_API_KEY` and `OBSIDIAN_MCP_PORT` are init's responsibility —
+  doctor cannot mint a new API key or guess a port, so those failures
+  always escalate to `/secondbrain:init`.
 
 # Forbidden Actions
 
-- Modifying any file
-- Calling any MCP tool that writes
-- Running shell commands that change state
-- Deleting anything
-- Running `/secondbrain:init` automatically (always tell the user to run it themselves)
+**In Turn 1 (Phase 1):**
+
+- Writing files. Period.
+- Calling any MCP tool that mutates (`vault_create`, `vault_update`,
+  `vault_delete`, `vault_patch`, `vault_edit`, `vault_edit_line`).
+- Running shell commands that change state (`chmod`, `cp`, `mv`, `rm`,
+  `git commit`, `git push`, `source`, `export`).
+- Invoking `doctor_cli.py --treat` (that's the Phase 2 command).
+- Assuming user consent. Phase 2 requires an EXPLICIT "yes" on the next
+  turn.
+
+**In Turn 2 (Phase 2), even on confirmation:**
+
+- Running `/secondbrain:init` automatically (always tell the user to
+  run it themselves for the escalation cases).
+- Mutating files outside the vault (except shell config via
+  `setup_env_vars`, which is an expected escalation path).
+- Deleting anything.
+- Skipping the post-treatment re-diagnostic.
+
+# Implementation Notes
+
+- `doctor_cli.py` encapsulates the check engine. The markdown skill body
+  is deliberately thin — if you find yourself re-implementing check logic
+  in natural language here, STOP and put it in `doctor_checks.py` with
+  unit tests.
+- The CLI's `--diagnose` mode has a filesystem-state invariant enforced
+  by tests: calling it must not change the vault's state hash. This
+  invariant is load-bearing. Don't break it.
+- Downstream checks are automatically skipped when upstream ones fail
+  (e.g. manifest/log/profile are skipped when `vault_reachable` fails).
+  The skill body does not need to replicate this dependency logic.
+- On a healthy vault, the report should show "Your secondbrain is healthy"
+  and no "want me to fix?" prompt.
+
+# Output Format
+
+The CLI produces a table like this — pass it through to the user verbatim:
+
+```
+secondbrain doctor report:
+
+  [PASS] plugin_root: CLAUDE_PLUGIN_ROOT=/Users/you/.claude/plugins/...
+  [PASS] environment: environment: Claude Code
+  [FAIL] obsidian_api_key: OBSIDIAN_API_KEY is not set. ...
+         -> escalation: run /secondbrain:init (doctor cannot mint an API key)
+  [FAIL] obsidian_mcp_port: OBSIDIAN_MCP_PORT is not set. ...
+         -> escalation: run /secondbrain:init or export manually
+  [PASS] obsidian_running: Obsidian process detected via pgrep
+  [SKIP] mcp_connection: skipped because OBSIDIAN_API_KEY / OBSIDIAN_MCP_PORT are not set
+  [FAIL] log_md: log.md (append-only audit trail) is missing. ...
+         -> doctor can fix this (runs create_log_md)
+  ...
+
+  Result: 7 passed, 3 failed, 0 warning, 5 skipped.
+
+  I can fix 1 of these — want me to? (yes/no)
+```

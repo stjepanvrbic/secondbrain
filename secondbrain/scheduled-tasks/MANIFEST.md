@@ -5,6 +5,7 @@ Each entry: task name, default cron, plugin skill, opt-in default.
 
 | Task | Cron | Skill | Default |
 |---|---|---|---|
+| morning-brief | 0 8 * * * | secondbrain-morning-brief (subagent) | on |
 | morning-briefing | 30 10 * * * | /secondbrain:morning-brief | on |
 | deadline-tracker | 0 13 * * * | /secondbrain:deadline-check | on |
 | email-triage | 0 9 * * 1-5 | /secondbrain:email-triage | on (requires Gmail MCP) |
@@ -27,6 +28,7 @@ Each entry: task name, default cron, plugin skill, opt-in default.
 
 | Cron | When |
 |---|---|
+| `0 8 * * *` | 8:00am every day |
 | `30 10 * * *` | 10:30am every day |
 | `0 13 * * *` | 1:00pm every day |
 | `0 9 * * 1-5` | 9:00am on weekdays (Mon-Fri) |

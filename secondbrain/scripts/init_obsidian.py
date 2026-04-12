@@ -26,6 +26,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import uuid
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -177,14 +178,26 @@ def ensure_obsidian_running(plat: str, dry_run: bool = False) -> bool:
         "windows": ["cmd", "/c", "start", "", "Obsidian"],
     }
     cmd = launch_cmds.get(plat, [])
+    # Hard cap on the foreground wait. If Obsidian isn't up in 60s something
+    # is wrong (headless Linux, crash-on-startup, wedged machine) and the
+    # user needs a clear message — not a silent hang.
+    LAUNCH_TIMEOUT_SECONDS = 60
+    TIMEOUT_MESSAGE = (
+        "Obsidian did not launch within 60 seconds. Possible causes: "
+        "(a) headless Linux environment (init requires a desktop session, "
+        "not SSH-only); (b) Obsidian crashed during startup — try launching "
+        "manually and re-running init; (c) slow machine — re-run init once "
+        "Obsidian is ready."
+    )
     try:
         if plat == "linux":
             subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
             subprocess.run(cmd, timeout=10)
-        # Wait for it to be ready
+        # Wait for it to be ready — poll once per second up to LAUNCH_TIMEOUT_SECONDS.
         import time
-        for _ in range(15):  # up to 15 seconds
+        deadline = time.monotonic() + LAUNCH_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
             time.sleep(1)
             try:
                 if plat == "macos":
@@ -203,7 +216,7 @@ def ensure_obsidian_running(plat: str, dry_run: bool = False) -> bool:
                     return True
             except (OSError, subprocess.TimeoutExpired):
                 continue
-        print("  Obsidian may not have started. Check manually.")
+        print(f"  {TIMEOUT_MESSAGE}")
         return False
     except (OSError, subprocess.SubprocessError) as e:
         print(f"  Failed to launch Obsidian: {e}")
@@ -290,7 +303,7 @@ def find_existing_vaults(plat: str) -> List[Tuple[str, Path]]:
         data = json.loads(obsidian_json.read_text(encoding="utf-8"))
         vaults = data.get("vaults", {})
         results = []
-        for _vault_id, info in vaults.items():
+        for info in vaults.values():
             vault_path = Path(info.get("path", ""))
             if vault_path.is_dir():
                 # Try to get vault name from path
@@ -561,21 +574,91 @@ def _print_manual_env(port: int, api_key: Optional[str]) -> None:
 
 REQUIRED_DIRS = ["brain", "entities", "me", "inbox", "archive", "archive/inbox", "scratch"]
 
+# `me/profile.md` is seeded from skills/init/templates/profile.md rather than
+# an inline string — the template is long enough that inlining it here would
+# be harder to read than a separate file, and keeping it on disk lets the init
+# skill and the scaffold stay in sync.
+PROFILE_TEMPLATE_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "skills" / "init" / "templates" / "profile.md"
+)
+
+# Placeholders the profile template uses. scaffold_vault writes the template
+# unchanged (placeholders intact) — the init skill fills them in during the
+# profile-seeding step after talking to the user. Stored as bare names (no
+# `{{...}}` wrapping) so the verification helper can compare them directly
+# against the set parsed out of the template text.
+PROFILE_PLACEHOLDERS = (
+    "USER_NAME", "USER_ROLE", "USER_NEXT_ROLE",
+    "USER_PARTNER", "USER_PREFERENCES",
+    "WAKEUP_TIME", "MORNING_WINDOW",
+    "AFTERNOON_WINDOW", "EVENING_WINDOW",
+)
+
 CRITICAL_FILES = {
     "brain/status.md": "---\nupdated: {date}\n---\n# Status\n\n## Current Focus\n\n_No focus set yet._\n",
     "brain/deadlines.md": "# Deadlines\n\n_No deadlines tracked yet._\n",
     "brain/goals.md": "# Goals\n\n_No goals set yet._\n",
     "brain/decisions.md": "# Decisions\n\n_No decisions recorded yet._\n",
     "brain/session-log.md": "# Session Log\n",
-    "me/profile.md": "# Profile\n\n_Run /secondbrain:init to seed your profile._\n",
     "glossary.md": "# Glossary\n\n_Add terms and acronyms here._\n",
     "log.md": f"# Log\n\n## [{date.today().isoformat()} 00:00] init | Vault created\nInitial vault scaffolding.\n",
     "_MANIFEST.md": "# Vault Manifest\n\n**Files:** 0\n**Last updated:** {date}\n",
 }
 
 
+def _verify_profile_template_placeholders(template_text: str) -> None:
+    """Sanity-check the profile template has the expected placeholder set.
+
+    Logs a warning to stderr if the template drifts from PROFILE_PLACEHOLDERS
+    but does not fail — scaffolding must proceed even if the template is
+    slightly off. This turns the PROFILE_PLACEHOLDERS constant into an
+    enforced contract: edits to the template that drop or add placeholders
+    surface immediately instead of silently going wrong during init.
+    """
+    found = set(re.findall(r"\{\{([A-Z_]+)\}\}", template_text))
+    expected = set(PROFILE_PLACEHOLDERS)
+    missing = expected - found
+    unexpected = found - expected
+    if missing:
+        print(
+            f"Warning: profile template missing placeholders: {sorted(missing)}",
+            file=sys.stderr,
+        )
+    if unexpected:
+        print(
+            f"Warning: profile template has unexpected placeholders: {sorted(unexpected)}",
+            file=sys.stderr,
+        )
+
+
+def _load_profile_template() -> str:
+    """Read the profile.md template shipped with the plugin.
+
+    Returns a minimal fallback string if the template file is missing, so
+    `scaffold_vault` still seeds a readable profile rather than crashing.
+    The fallback path only fires if the plugin install is broken; normal
+    runs read the full template.
+    """
+    try:
+        text = PROFILE_TEMPLATE_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return (
+            "# Profile\n\n"
+            "_Run /secondbrain:init to seed your profile "
+            "(the template file is missing from the plugin install)._\n"
+        )
+    _verify_profile_template_placeholders(text)
+    return text
+
+
 def scaffold_vault(vault_path: Path, dry_run: bool = False) -> int:
-    """Create vault structure. Returns count of created items. Never overwrites."""
+    """Create vault structure. Returns count of created items. Never overwrites.
+
+    me/profile.md is seeded from skills/init/templates/profile.md if absent.
+    Existing profile.md files are never touched (same rule as every other
+    critical file).
+    """
     created = 0
     today = date.today().isoformat()
 
@@ -598,6 +681,17 @@ def scaffold_vault(vault_path: Path, dry_run: bool = False) -> int:
                 file_path.parent.mkdir(parents=True, exist_ok=True)
                 file_path.write_text(content)
             created += 1
+
+    # me/profile.md — seeded from the shipped template. Never overwrite an
+    # existing file; the init skill fills placeholders in a separate step.
+    profile_path = vault_path / "me" / "profile.md"
+    if not profile_path.exists():
+        if dry_run:
+            print("  WOULD CREATE file: me/profile.md (from template)")
+        else:
+            profile_path.parent.mkdir(parents=True, exist_ok=True)
+            profile_path.write_text(_load_profile_template())
+        created += 1
 
     # Ensure .obsidian directory exists
     obsidian_dir = vault_path / ".obsidian"
@@ -630,7 +724,7 @@ def import_notes(vault_path: Path, source: Path, dry_run: bool = False) -> int:
     copied = 0
     skipped = 0
 
-    for dirpath, _dirnames, filenames in os.walk(source):
+    for dirpath, _, filenames in os.walk(source):
         for fname in filenames:
             src = Path(dirpath) / fname
             if src.suffix.lower() not in IMPORTABLE_SUFFIXES:
@@ -703,6 +797,97 @@ def run_rebuild_manifest(vault_path: Path, dry_run: bool = False) -> bool:
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
+
+
+# ---------------------------------------------------------------------------
+# Install marker — .secondbrain-installed with vault_id + timestamps
+# ---------------------------------------------------------------------------
+
+def write_install_marker(
+    vault_path: Path,
+    results: Dict[str, Any],
+    dry_run: bool,
+) -> None:
+    """Write `${vault_path}/.secondbrain-installed` and register the vault.
+
+    Marker lifecycle (idempotent):
+      - On first install: generate a new UUID4 for `vault_id`, stamp
+        `installed_at` and `last_init_at` with today's date.
+      - On re-run: preserve the existing `vault_id` and `installed_at`; only
+        update `last_init_at`.
+      - Legacy markers missing these fields get them added without losing
+        any existing `steps` / `errors` / `platform` keys.
+      - An invalid (non-UUID) `vault_id` is replaced with a fresh UUID4 —
+        defends against hand-edits that drop garbage into the file.
+
+    After writing the marker, the vault is registered in
+    `~/.config/secondbrain/vaults.json` via `setup_steps.add_vault_to_config`.
+    Re-running is a no-op (the config helper deduplicates by vault_id).
+
+    If `dry_run=True`, neither the marker nor the vaults.json entry is touched.
+    The marker lives inside the vault (not in ~/) so it doesn't pollute the
+    user's home directory during tests or CI runs.
+    """
+    marker = vault_path / ".secondbrain-installed"
+
+    # Load any existing marker — we want to preserve vault_id + installed_at.
+    existing: Dict[str, Any] = {}
+    if marker.exists():
+        try:
+            raw = marker.read_text()
+            if raw.strip():
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    existing = parsed
+        except (OSError, json.JSONDecodeError):
+            # Corrupt marker — treat as empty and let the write overwrite it.
+            existing = {}
+
+    # Preserve or mint vault_id. An existing-but-invalid UUID is regenerated.
+    vault_id = existing.get("vault_id")
+    if not isinstance(vault_id, str) or not vault_id:
+        vault_id = str(uuid.uuid4())
+    else:
+        try:
+            uuid.UUID(vault_id)
+        except ValueError:
+            vault_id = str(uuid.uuid4())
+
+    today = date.today().isoformat()
+    installed_at = existing.get("installed_at") if isinstance(existing.get("installed_at"), str) else None
+    if not installed_at:
+        installed_at = today
+
+    results["vault_id"] = vault_id
+    results["installed_at"] = installed_at
+    results["last_init_at"] = today
+
+    if dry_run:
+        print(f"\nWould write marker to {marker}")
+        return
+
+    marker.write_text(json.dumps(results, indent=2))
+    print(f"\nResults written to {marker}")
+
+    # Register this vault in ~/.config/secondbrain/vaults.json. Import locally
+    # so setup_steps is only loaded when init actually runs (avoids circular
+    # import risk and keeps module-level import surface small).
+    try:
+        import setup_steps  # type: ignore[reportMissingImports]
+    except ImportError as exc:
+        print(f"  Note: could not import setup_steps ({exc}); vault not registered")
+        return
+
+    reg = setup_steps.add_vault_to_config(
+        vault_path=vault_path,
+        vault_id=vault_id,
+        name=vault_path.name,
+        role="personal",
+    )
+    if reg.success:
+        print(f"  Vault registered: {reg.message}")
+    else:
+        print(f"  Warning: vault registration failed: {reg.message}")
 
 
 # ---------------------------------------------------------------------------
@@ -833,8 +1018,30 @@ def main(argv: Optional[List[str]] = None) -> int:
     shell = detect_shell()
     print(f"  Shell: {shell}")
     if port:
-        set_env_vars(port, api_key, shell, dry_run)
-        results["steps"].append(f"env vars: port={port}")
+        # T6: delegate env var writing to setup_steps.setup_env_vars so
+        # init and doctor share exactly one code path for this write.
+        # The inline set_env_vars() / _set_env_vars_powershell() helpers
+        # stay around because setup_steps ultimately calls back into them;
+        # this branch just routes the main() flow through the shared wrapper.
+        try:
+            import setup_steps  # type: ignore[reportMissingImports]
+        except ImportError as exc:
+            print(f"  Note: setup_steps not importable ({exc}); "
+                  "falling back to inline set_env_vars")
+            set_env_vars(port, api_key, shell, dry_run)
+            results["steps"].append(f"env vars: port={port}")
+        else:
+            env_result = setup_steps.setup_env_vars(
+                api_key=api_key, port=port, dry_run=dry_run,
+            )
+            if env_result.success:
+                print(f"  {env_result.message}")
+                results["steps"].append(f"env vars: port={port}")
+            else:
+                print(f"  {env_result.message}")
+                results["errors"].append(
+                    f"env vars: {env_result.error or env_result.message}"
+                )
     else:
         results["errors"].append("mcp plugin: no config")
 
@@ -871,11 +1078,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("\nNext step: Open Obsidian, enable the connect-mcp plugin,")
         print("then re-run this script to pick up the generated API key.")
 
-    # Write marker inside the vault (not home dir — avoids polluting user env during tests)
-    marker = vault_path / ".secondbrain-installed"
-    if not dry_run:
-        marker.write_text(json.dumps(results, indent=2))
-    print(f"\nResults written to {marker}")
+    # Write marker inside the vault (not home dir — avoids polluting user env during tests).
+    # write_install_marker handles vault_id + timestamps idempotently and
+    # registers the vault in ~/.config/secondbrain/vaults.json on real runs.
+    write_install_marker(vault_path, results, dry_run)
 
     return 1 if results["errors"] else 0
 

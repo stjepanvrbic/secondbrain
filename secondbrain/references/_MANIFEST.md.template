@@ -50,7 +50,7 @@ All wiki pages with one-line summaries. Maintained by dream-protocol nightly.
 
 | File | Purpose |
 |------|---------|
-| [[CLAUDE.md]] | Brain state: personality, communication rules, skill routing |
+| [[me/profile]] | User bio, daily rhythms, static preferences (referenced by hot-memory) |
 | [[glossary]] | Acronyms, shorthand, nicknames |
 | [[_MANIFEST]] | This file |
 
@@ -60,12 +60,13 @@ All wiki pages with one-line summaries. Maintained by dream-protocol nightly.
 
 | File | Purpose |
 |------|---------|
-| [[brain/status]] | Current state — updated by dream-protocol |
-| [[brain/commitments]] | All tasks with Dataview metadata |
+| [[brain/status]] | Current state + all tasks with Dataview metadata — updated by dream-protocol |
 | [[brain/deadlines]] | Hard dates and countdowns |
 | [[brain/goals]] | Life goals |
 | [[brain/decisions]] | Decisions + rationale |
 | [[brain/session-log]] | Session history |
+| [[brain/hot-memory]] | Always-loaded agent context (SessionStart hook) — regenerated nightly by dream-protocol, updated incrementally by the ingester |
+| [[brain/morning-brief]] | Cached 08:00 morning brief — written by the secondbrain-morning-brief subagent, read by whats-next on demand |
 
 ---
 

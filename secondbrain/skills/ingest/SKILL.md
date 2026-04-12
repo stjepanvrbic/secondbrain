@@ -1,28 +1,29 @@
 ---
 name: ingest
 description: >
-  This skill should be used when the user sends a "brain dump", "random thoughts",
-  unstructured text with multiple pieces of info, copy-pasted content from email
-  or Slack, screenshots, voice transcripts, or when session-start detects
-  unprocessed inbox files. Routes raw input to structured vault entries with
-  mandatory wikilink enforcement.
+  Dispatches the secondbrain-ingester subagent to process a brain dump.
+  Used when the user sends unstructured multi-fact input, copy-pasted
+  text, screenshots, or voice transcripts. The subagent runs in isolation
+  (its own context, its own transcript) and returns a one-line summary;
+  the main agent does NOT read the brain dump into its own context to do
+  routing or extraction.
 metadata:
-  version: "3.3.0"
+  version: "3.5.0"
 ---
 
 # Core Rule
 
-All raw input becomes structured vault entries with full wikilinks and metadata. NO information enters vault unlinked. One-line confirmation only — no narration.
+When the user sends a brain dump, **dispatch the secondbrain-ingester
+subagent via the Task tool**. Wait for the subagent to return. Report its
+one-line summary to the user verbatim. Do NOT process the brain dump
+content in your own context — that is the whole point of the T13
+delegation refactor.
 
-# Prerequisites
-
-1. Read `_MANIFEST.md` for current vault state.
-2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
-3. For content templates, read `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`.
-
-# Pre-Conditions (verify before executing)
-- MCP connection is live: `mcp__obsidian__vault_list` with path `/` returns
-- `brain/status.md` exists
+This skill exists so the main agent stays thin on ingest-heavy
+conversations. Routing logic, extraction rules, hot-memory update
+reasoning, and write operations all live inside the
+`secondbrain-ingester` subagent. Duplicating any of that here re-
+introduces the token cost that T13 was written to fix.
 
 # Auto-Triggers
 
@@ -34,125 +35,143 @@ All raw input becomes structured vault entries with full wikilinks and metadata.
 - Session-start detects unprocessed files in the vault `inbox/` folder
 - Stream-of-consciousness text that is NOT a direct question or task request
 
-**FORBIDDEN: Responding to brain dump without running ingest first.**
+**FORBIDDEN: Responding to a brain dump without dispatching the ingest
+subagent first.**
 
-# Processing Rules (MANDATORY)
+# Steps (Foreground Dispatch)
 
-## Rule 1: Wikilink Enforcement (NON-NEGOTIABLE)
+This is the **foreground** dispatch path — the user is waiting for a
+one-line summary, so you call the subagent synchronously via the Task
+tool and wait. The Stop hook has a separate **background** dispatch
+path that uses `nohup ... & disown`; you do not touch that path from
+here. Do not background the Task tool invocation — that hides errors
+from the user and breaks the "one-line summary" discipline.
 
-Every piece of ingested content MUST be linked to ALL related entities.
+## 1. Gather environment details
 
-For each piece of info, ask:
-- Who is involved? → `[[entities/person-name]]`
-- What domain? → `[[domain-name]]`
-- What decision/goal does this relate to? → `[[brain/decisions#section-name]]`
-- What other sections does this cross-reference? → `[[file#section]]`
+- Active vault path: read from `~/.config/secondbrain/vaults.json`
+  (the `SECONDBRAIN_VAULTS_CONFIG` override applies if set).
+- Active vault id: same source.
+- Your current working directory: use `pwd`.
+- The raw brain-dump content: the user's message text, in full.
 
-**NO UNLINKED INFORMATION ENTERS THE VAULT.** If text is written without wikilinks, go back and add them.
+## 2. Build a context envelope JSON
 
-## Rule 2: Inline Metadata (for tasks)
+The envelope has the same shape as the Stop hook envelope so the
+subagent can read both formats uniformly (see
+`agents/secondbrain-ingester.md` for the shape specification). For an
+explicit brain-dump dispatch, populate the fields as follows:
 
-Every task gets full metadata inline:
+- `session_id`: a synthetic id of the form `explicit-<ISO timestamp>`
+- `vault_path`: absolute path to the active vault
+- `vault_id`: value from the vaults.json entry
+- `cwd`: your current working directory
+- `cursor_path`: `null` (explicit dispatch is one-shot, not cursor-driven)
+- `last_assistant_message`: `null`
+- `new_turns`: a single synthetic turn whose `content` is the full
+  brain-dump text:
 
-```markdown
-- [ ] Task description [[entity]] #domain [due:: 2026-MM-DD] [energy:: low|medium|high] [est:: 15min|30min|1hr|2hr]
-```
+  ```json
+  [
+    {
+      "uuid": "explicit-1",
+      "index": 0,
+      "role": "user",
+      "content": "<full brain dump>",
+      "timestamp": "<ISO timestamp>"
+    }
+  ]
+  ```
 
-Field order: entity link → #domain → [due::] → [energy::] → [est::]
+- `cursor_state_before`: `null`
 
-## Rule 3: Atomic Sections
+## 3. Write the envelope to a temp file
 
-Structure writes as atomic sections with clear headings, 1-3 bullets, wikilinks throughout.
+Use `mktemp` (or an equivalent Python one-liner) to create a path like
+`/tmp/secondbrain-explicit-ingest-<timestamp>.json` and write the
+envelope JSON to it.
 
-## Rule 4: Entity Creation
+## 4. Dispatch the secondbrain-ingester subagent via the Task tool
 
-If ingestion mentions a new entity not in the vault `entities/` folder, create the entity file. See **`references/routing-rules.md`** for template.
+Invoke the Task tool with:
 
-# Processing Algorithm (Karpathy multi-page-touch discipline)
+- `description`: `"Ingest brain dump"` (short, user-facing)
+- `subagent_type`: `"secondbrain-ingester"`
+- `prompt`: `"Process the explicit brain-dump envelope at <path>. Session: explicit-<timestamp>."`
 
-A single ingest should NOT just dump content into one file. It should spread the update across all relevant pages — primary destination, referenced entities, log, manifest. This is the "wiki maintenance" discipline.
+Note: `subagent_type` is the Task tool's parameter name. It MUST match
+the frontmatter `name` in `agents/secondbrain-ingester.md` exactly.
 
-```
-FOR each logical unit in input (task, idea, decision, person, deadline):
-  1. Determine type (task? idea? decision? entity? term?)
-  2. Route to appropriate destination (see references/routing-rules.md)
-  3. Extract ALL entities mentioned
-  4. Ensure EVERY entity gets a [[wikilink]]
-  5. Add inline metadata if task
-  6. Write to destination file as atomic section (append, don't overwrite)
-  7. VERIFY all wikilinks added
-  8. Update referenced entity pages — for each [[entity]] linked from this
-     content, append a one-line context note to the entity's file
-     (e.g., "Mentioned in status {{date}} re: <topic>")
-ENDFOR
+## 5. Wait for the subagent's response (foreground)
 
-# Spread the update (per Karpathy wiki pattern)
-9. APPEND a single entry to log.md summarizing this ingest:
-   ## [YYYY-MM-DD HH:MM] ingest | <one-line title>
-   <body: counts of what was added, key entities updated>
-   (See @${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md for log.md format)
+The Task tool call is synchronous. Do not attempt to background it, do
+not poll, do not spawn side channels. When it returns, you have the
+subagent's final message.
 
-10. The _MANIFEST.md content catalog is regenerated nightly by dream-protocol —
-    no need to update it inline. New entities will appear in the catalog after
-    the next dream run.
+## 6. Report the one-line summary verbatim
 
-11. After processing inbox items, run:
-    `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py ${VAULT_PATH}`
-    to move processed files to archive/inbox/.
+Take the subagent's return string and print it to the user as-is. No
+prose around it. No "Here is the summary:" preamble. No "Let me know
+if you need anything else" postamble.
 
-OUTPUT:
-  "Got it — added [X tasks], [X ideas], [X decisions], created [X entities], updated [[entity1]] [[entity2]]."
-  ONE LINE only.
-```
-
-# Post-Write Validation
-After ALL writes are complete:
-1. Run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} --modified-only [files-you-touched] --json`
-2. If errors found (missing entities, broken links), fix immediately
-3. For missing entities: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py ${VAULT_PATH} entity-name`
-4. Do NOT mark the operation as complete until validation passes
-
-# Response Style
-
-**FORBIDDEN:**
-- "Let me process this step by step..."
-- Asking clarifying questions: "Did you mean...?"
-- Summarizing what was extracted
-
-**REQUIRED:**
+**Required**:
 ```
 Got it — added 2 tasks, 1 decision, updated [[entities/xavier-laurens]].
 ```
 
-If ambiguity exists, make best guess and add note:
+**FORBIDDEN**:
 ```
-Got it — 1 task (unclear on deadline, guessed this week), 1 idea.
+Let me process this for you...
+Here's what I added:
+- 2 tasks
+...
 ```
 
-# Error Handling
+# Prerequisites
 
-- vault_patch fails -> read current file state, re-plan the edit, retry once
-- Entity doesn't exist -> create stub via scripts/create_entity_stubs.py
-- DQL query returns empty -> fall back to vault_search, then vault_list
-- Never mark operation complete if validation failed
-- **Ambiguous entity names**: Create or link to best-guess entity, note "verify entity link"
-- **Missing deadline**: Ingest without [due::], note in status.md
-- **Unknown domain**: Create note in scratch/ideas.md flagged for review
-- **Broken entity links**: Add them anyway, dream protocol fixes nightly
-- **Very long brain dump**: Process in chunks, maintain logical grouping
+For general context on the vault, routing rules, and shared write rules,
+the subagent reads these itself:
+
+1. `_MANIFEST.md` for current vault state.
+2. `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md` for vault layout.
+3. `@${CLAUDE_PLUGIN_ROOT}/references/templates.md` for content templates.
+4. `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md` for shared write rules.
+5. `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md` for script invocations.
+
+You (the main agent) do **not** need to load any of these when running
+this skill — the subagent owns the ingest workflow. They are listed
+here for informational completeness only.
 
 # Forbidden Actions
 
-- Creating new task files (brain/status.md is ONLY task file)
-- Asking clarifying questions during dump
-- Narrating processing step-by-step
-- Modifying inbox files in place (they are moved to archive/inbox/ after processing)
-- Leaving ANY text unlinked
-- Using TASKS.md (does not exist in this system)
+- **Processing the brain dump content in your own context.** You dispatch
+  and report. The subagent does the actual routing and writes. If you
+  start extracting entities, tagging tasks, or calling MCP tools
+  yourself, you are running the pre-T13 code path and wasting the user's
+  tokens.
+- **Backgrounding the Task tool invocation.** The explicit dispatch is
+  foreground-only. Background dispatch happens exclusively from the
+  Stop hook via `nohup ... & disown`, never from a skill.
+- **Adding your own commentary around the subagent's summary.** The
+  one-line summary is the whole user-facing surface of this skill. Do
+  not expand it, do not summarize it, do not editorialize.
+- **Processing the brain dump when the subagent errors out.** If the
+  Task tool returns an error, report the error verbatim and stop — do
+  NOT fall back to inline processing. Silent fallback re-introduces
+  the pre-T13 token cost and hides subagent bugs.
+- **Creating new task files.** The subagent writes to `brain/status.md`;
+  you do not create `TASKS.md` or anything similar.
+- **Asking clarifying questions during a dump.** The subagent handles
+  ambiguity via its own `[verify:: true]` discipline. Let it work.
 
 # Implementation Notes
 
-- Timestamp format: ISO 8601 local time
-- Entity names: kebab-case in filenames, wikilink as full name `[[entities/Xavier Laurens]]`
-- Metadata order on tasks: entity → #domain → [due::] → [energy::] → [est::]
-- If input has >10 items, process all, confirmation stays one line
+- Timestamp format for the synthetic session id: ISO 8601 local time.
+- Envelope path convention:
+  `/tmp/secondbrain-explicit-ingest-<ISO timestamp>.json`.
+- If the envelope write fails (disk full, /tmp unwritable), abort the
+  skill with a visible error. Do not fall back to inline processing.
+- If the Task tool is not available (e.g., the main agent's
+  environment is missing it), print a clear "Task tool unavailable;
+  cannot ingest — please try again in a new session." message. Do not
+  fall back to inline processing.

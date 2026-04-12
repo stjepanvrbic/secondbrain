@@ -6,7 +6,7 @@ description: >
   Loads vault context, processes overnight inbox, builds an energy-matched
   3-5 task day plan, and presents it directly. Scheduled task only.
 metadata:
-  version: "3.3.0"
+  version: "3.5.0"
 ---
 
 # Core Rule
@@ -16,14 +16,15 @@ Build and present an energy-matched day plan. Load context, process overnight in
 # Prerequisites
 
 1. Read `_MANIFEST.md` for current vault state.
-2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
-3. For content templates, read `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`.
+2. Read `me/profile.md` for the user's daily rhythms — the energy-window table below is seeded with defaults, but profile.md is the source of truth.
+3. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
+4. For content templates, read `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`.
 
 # Steps
 
 ## 1. Load Context
 
-Read brain/status.md (all open tasks), brain/goals.md, brain/battle-plan-milestones.md, and me/energy.md. Use DQL queries to get urgent/upcoming tasks efficiently.
+Read brain/status.md (all open tasks), brain/goals.md, brain/battle-plan-milestones.md, and me/profile.md (for rhythms). Use DQL queries to get urgent/upcoming tasks efficiently.
 
 ## 2. Process Overnight Inbox
 

@@ -12,7 +12,7 @@ description: >
   Supports a `--verify` mode that runs verification only (no creates,
   no installs) for diagnosing existing installs.
 metadata:
-  version: "3.3.0"
+  version: "3.5.0"
 ---
 
 # Core Rule
@@ -87,7 +87,7 @@ Print: `Detected environment: Claude Code` (or `Claude Cowork`).
 
 ## 1b. Detect first-install vs re-init
 
-Check for `~/.secondbrain-installed` marker file.
+Check for `.secondbrain-installed` marker file inside the candidate vault path. If VAULT_PATH is set, check at `${VAULT_PATH}/.secondbrain-installed`. If the user specified a vault path during this init run, check at `<that-path>/.secondbrain-installed`.
 - If present: this is a re-init — print "I see you've installed me before. I'll check what's still working and only fix what's broken."
 - If absent: this is a first install.
 
@@ -370,6 +370,17 @@ Check for these specific v2→v3 markers and print explanation for each that app
 - `brain/commitments.md` exists → "commitments.md is deprecated since v3. Tasks now live in brain/status.md. I'll archive commitments.md to archive/commitments-v2.md."
 - Inbox has files containing `[processed:: true]` → "v3 moves processed inbox items to archive/inbox/ instead of marking them in place. I'll move them to archive."
 - Missing entity files (from verify output entity-stubs check) → "N entity files are referenced but don't exist. I'll create stubs."
+- `CLAUDE.md` exists at the vault root → print the legacy-CLAUDE.md note below. Do NOT auto-delete, auto-archive, or auto-rewrite it.
+
+**Legacy CLAUDE.md note (print when `CLAUDE.md` is present at the vault root):**
+
+```
+I see a CLAUDE.md at the vault root. Since v3.3.3 the plugin no longer
+ships a CLAUDE.md template — routing rules and user bio now live in
+plugin-owned files and in me/profile.md. Your existing CLAUDE.md is
+orphaned but harmless; I'm leaving it alone. You can delete it by hand
+whenever you want, or wait for a future migration script to archive it.
+```
 
 If none apply, skip this substep.
 
@@ -461,6 +472,134 @@ After the user provides a source path:
 ## Vault path storage
 
 After vault setup, the VAULT_PATH must be available to all scripts and hooks. The init script writes env vars to the shell config. If the user specified a non-default vault path, also store it in the vault's `.secondbrain-installed` marker for future reference.
+
+## Seed brain/hot-memory.md
+
+**This step runs for ALL scenarios (fresh, connect, import).** After the vault is scaffolded (and vault_path is known) but before anything else touches the vault, seed `brain/hot-memory.md` with the T10 INITIAL_TEMPLATE so the SessionStart hook and the ingester both have a valid file to read on their next run. The helper is idempotent: on a Scenario 2 vault that already has a valid hot-memory, it's a no-op.
+
+```bash
+python3 -c "import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/scripts'); from setup_steps import create_hot_memory_initial; from pathlib import Path; r = create_hot_memory_initial(Path('${VAULT_PATH}')); print(r.message); sys.exit(0 if r.success else 1)"
+```
+
+Print the returned message. If the call fails, surface the error and continue — the first dream-protocol run will regenerate the file via `update_hot_memory.py --regenerate`, so this is a soft fallback rather than a hard blocker.
+
+---
+
+# Step 4a — Vault git tracking
+
+**This step runs for ALL scenarios (fresh, connect, import).** After the vault is scaffolded and before scheduled tasks are installed, offer the user local git tracking for the vault. Git gives them per-turn commits they can review, and enables `/secondbrain:undo-last-turn` to roll back a single agent turn. It stays LOCAL unless the user also opts into a remote.
+
+## 4a.1 Ask about local git
+
+Print this prompt verbatim and wait for a yes/no answer:
+
+```
+I'd like to put your vault under version control with git. This means:
+  - Every change the agent makes becomes a commit you can review
+  - You can roll back any single agent turn with /secondbrain:undo-last-turn
+  - This stays LOCAL to your machine — I will NOT push anywhere automatically
+
+This works alongside iCloud / Dropbox / Obsidian Sync but they sometimes
+fight each other. If you sync your vault, say "no" and I'll skip git for now.
+
+OK to enable git? (yes/no)
+```
+
+- If the user says **no**: print `Skipping git tracking — you can enable it later with /secondbrain:doctor.` and jump to Step 5. Do not block init.
+- If the user says **yes**: continue to 4a.2.
+
+## 4a.2 Initialize git in the vault
+
+Invoke the vault_git helper:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vault_git.py init --vault "${VAULT_PATH}"
+```
+
+Capture stdout. If the result mentions `already a git repo`, print `Git was already set up — skipping.` and continue to 4a.3 (the user may still want to add a remote to an existing repo).
+
+If init fails, print the error and ask the user to resolve it (most likely: `git` is not on PATH). Do not advance until the user either fixes it or chooses to skip git entirely.
+
+After init succeeds, also write the default `.gitignore` and initial commit via the same helper — the library-level `setup_git` function handles this idempotently:
+
+```bash
+python3 -c "import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/scripts'); from setup_steps import setup_git; from pathlib import Path; r = setup_git(Path('${VAULT_PATH}')); print(r.message); sys.exit(0 if r.success else 1)"
+```
+
+Print the message and verify success before continuing.
+
+## 4a.3 Ask about a remote
+
+Print this prompt verbatim:
+
+```
+Do you also want to push your vault to a remote git repository for
+cross-device sync? You'll need to set this up yourself outside Obsidian
+(GitHub, GitLab, your own git server). I'll only push to the URL you
+give me, and only if you confirm.
+
+Enable remote push? (yes/no)
+```
+
+- If **no**: persist `with_push=false` via 4a.5 and jump to Step 5.
+- If **yes**: continue to 4a.4.
+
+## 4a.4 Collect and validate the remote URL
+
+Ask for the URL:
+
+```
+What's the remote URL? (e.g., git@github.com:user/my-vault.git or
+https://github.com/user/my-vault.git)
+```
+
+Validate the URL shape. A valid git remote URL starts with one of:
+- `git@` (SSH shorthand, e.g., `git@github.com:user/repo.git`)
+- `https://` (HTTPS with optional auth)
+- `ssh://` (explicit SSH)
+- `file://` (local bare repo, primarily for tests)
+
+If the URL doesn't match any of those prefixes, re-ask until it does. Do not proceed with a URL that failed validation — an unvalidated URL is the exact failure mode the Forbidden Action below is designed to prevent.
+
+Once validated, add the remote and push:
+
+```bash
+git -C "${VAULT_PATH}" remote add origin "<url>"
+git -C "${VAULT_PATH}" push -u origin HEAD
+```
+
+If `git remote add` fails because origin already exists, print the existing URL and ask the user whether to overwrite. If they say yes: `git -C "${VAULT_PATH}" remote set-url origin "<url>"`, then retry the push.
+
+If `git push` fails (wrong permissions, remote doesn't exist yet, network down, etc.), print the error verbatim and ask how to proceed:
+
+```
+The push failed:
+
+  <error output>
+
+What do you want to do?
+  1. Retry (I'll run the push again)
+  2. Skip remote (keep local git, forget the remote URL)
+  3. Abort git (remove local git entirely)
+
+Which one? (1, 2, or 3)
+```
+
+- **1 (retry)**: re-run `git -C "${VAULT_PATH}" push -u origin HEAD` and loop back to this prompt on failure.
+- **2 (skip remote)**: run `git -C "${VAULT_PATH}" remote remove origin` and jump to 4a.5 with `with_push=false`.
+- **3 (abort git)**: leave the repo alone (the user can clean it up with `rm -rf ${VAULT_PATH}/.git` if they really want to undo everything), but persist `with_push=false` and jump to Step 5.
+
+## 4a.5 Persist the with_push flag in vaults.json
+
+Whether or not the user enabled a remote, record the final `with_push` value in `~/.config/secondbrain/vaults.json` so T9's Stop hook knows whether to push after every commit:
+
+```bash
+python3 -c "import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/scripts'); from setup_steps import add_vault_to_config, list_configured_vaults; from pathlib import Path; entries = [v for v in list_configured_vaults() if v.path == str(Path('${VAULT_PATH}').resolve())]; [add_vault_to_config(Path(v.path), v.id, v.name, v.role, with_push=${WITH_PUSH}) for v in entries]"
+```
+
+Where `${WITH_PUSH}` is the literal Python boolean `True` or `False`. This is a simple idempotent update — add_vault_to_config takes care of the compare-and-write.
+
+Print: `Git tracking enabled (remote: yes/no, auto-push: yes/no).`
 
 ---
 
@@ -555,6 +694,14 @@ After running these in Cowork, all 6 scheduled tasks will be active.
 They run when Claude Desktop is open and your computer is awake.
 ```
 
+3. **Confirm registration before proceeding.** Cowork is out-of-band — the skill has no way to query whether the `/schedule` commands were actually accepted. Block here until the user acknowledges:
+
+```
+Confirm: did you paste all 6 commands into Cowork chat and see them accepted? [y/n]
+```
+
+If the user answers `y`, continue. If `n` (or anything else), re-print the 6 commands and ask again. Do not advance to Step 6 until the user confirms `y`. If the user says they want to skip scheduled tasks entirely after seeing them, treat it as the 5a "skip" path and print the same "managed elsewhere" message.
+
 Print: `✓ Bundled N scheduled task templates. Run the /schedule commands above to activate them.`
 
 ---
@@ -582,8 +729,18 @@ A few quick questions so I'm not starting cold:
 ```
 
 After answers:
-- Replace placeholders in `CLAUDE.md` (USER_NAME, USER_ROLE, USER_PREFERENCES)
-- Write answers into `me/profile.md` as a structured section
+- Open `me/profile.md` (scaffolded from `${CLAUDE_PLUGIN_ROOT}/skills/init/templates/profile.md` during Step 4)
+- Replace ALL 9 `{{...}}` placeholders in `me/profile.md`. After this step, the file must contain zero literal `{{...}}` strings. Handle each placeholder as follows:
+  - `{{USER_NAME}}` — replace with the user's answer from Q1
+  - `{{USER_ROLE}}` — replace with the user's answer from Q2
+  - `{{USER_PREFERENCES}}` — replace with the user's answer from Q3
+  - `{{USER_NEXT_ROLE}}` — replace with `_not set yet — add later when relevant_` (the agent will fill this in naturally from future conversation; don't ask now)
+  - `{{USER_PARTNER}}` — replace with `_not set yet — add later when relevant_` (same — fill in later if/when the user mentions a partner)
+  - `{{WAKEUP_TIME}}` — replace with `8:00am` (reasonable default)
+  - `{{MORNING_WINDOW}}` — replace with `8am-12pm` (reasonable default)
+  - `{{AFTERNOON_WINDOW}}` — replace with `12pm-6pm` (reasonable default)
+  - `{{EVENING_WINDOW}}` — replace with `6pm-10pm` (reasonable default)
+- The rhythm defaults are a starting point, not a question — replace the literal placeholder strings with the defaults above; don't leave any `{{...}}` tokens behind. If the user volunteers different rhythm values in conversation, use those instead.
 - Print: `Profile seeded. It'll build up naturally from here — you can always edit me/profile.md directly.`
 
 ---
@@ -657,18 +814,66 @@ For "Skip": note in the final report that sync is not configured.
 
 ---
 
-# Step 9 — Setup Complete
+# Step 9 — Write install marker
 
-Print the final summary:
+Write the install marker to `${VAULT_PATH}/.secondbrain-installed` with results JSON. `init_obsidian.py` does this automatically when Step 4 runs; if you got here via a custom path, confirm the marker is present and regenerate it via `init_obsidian.py --vault-path "${VAULT_PATH}" --skip-install` if missing.
+
+Do NOT print the "Setup complete!" summary yet — Step 10 runs doctor first and gates the final success message on doctor reporting a clean state.
+
+---
+
+# Step 10 — Final verification via doctor
+
+**This step is NOT optional. Init is only "done" when doctor reports a clean vault. Without this gate, init can regress to claiming success while the vault is still unhealthy.**
+
+## 10a. Run doctor diagnose
+
+Invoke doctor in diagnose mode to confirm the install is healthy:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --diagnose --vault "${VAULT_PATH}"
+```
+
+Capture stdout. Parse the summary line (`Result: X passed, Y failed, Z warning, W skipped.`).
+
+## 10b. Branch on diagnose result
+
+**If all checks pass (Y == 0):** proceed to 10d and print the success summary.
+
+**If diagnose reports any failures (Y > 0):** proceed to 10c to treat them.
+
+## 10c. Run doctor in treat mode
+
+Invoke doctor in treatment mode to auto-fix what it can:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --treat --vault "${VAULT_PATH}" --interactive
+```
+
+`--interactive` lets treatment functions like `setup_profile` prompt the user where needed (profile seeding asks a few questions when the template still has `{{placeholder}}` tokens).
+
+After treatment finishes, re-run diagnose to verify:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --diagnose --vault "${VAULT_PATH}"
+```
+
+**If the re-diagnose is clean:** proceed to 10d.
+
+**If there are still failures:** list each remaining failure with the escalation instruction from doctor's output. Do NOT print "Setup complete!" — tell the user exactly what manual step is needed. Offer to re-run init, or point them at `/secondbrain:doctor` for a standalone treatment turn.
+
+## 10d. Print the Setup Complete summary (only if doctor reports clean)
+
+**Gate:** only print this block if doctor reports clean (zero non-skip failures). If any failure remains after 10c, fall through to 10e instead.
 
 ```
-Setup Complete!
+Setup complete! Your secondbrain is healthy.
 
 Environment: Claude Code
 Vault: ~/vault/ (N files, N entities, N active tasks)
 Profile: seeded / already populated
 Scheduled tasks: N installed / skipped (managed elsewhere)
-Vault health: 0 errors
+Vault health: 0 errors (doctor clean)
 Sync: configured / not configured
 
 You're ready. Try:
@@ -679,7 +884,22 @@ You're ready. Try:
   "/secondbrain:init --verify"  → re-verify
 ```
 
-Write the install marker to `${VAULT_PATH}/.secondbrain-installed` with results JSON.
+## 10e. Failure path — remaining issues
+
+If doctor still reports failures after treatment, print:
+
+```
+Setup is NOT complete. Doctor reports N remaining issue(s):
+
+  - <check name>: <failure message>
+    → Manual fix: <escalation instruction from doctor output>
+  ...
+
+Run /secondbrain:doctor after addressing each issue, or re-run
+/secondbrain:init once you've fixed the blockers.
+```
+
+**Never** print "Setup complete!" when doctor reports any non-skip failure. This is the hard gate — the Phase 1 "init leaves vault in verified state" loop is only closed when doctor is clean.
 
 ---
 
@@ -690,18 +910,17 @@ When invoked with `--verify`, skip Steps 0-8. Run only verification — no creat
 Run these checks and print pass/fail for each:
 
 1. Environment detection (Code vs Cowork) — informational
-2. `~/.secondbrain-installed` marker exists?
+2. `${VAULT_PATH}/.secondbrain-installed` marker exists?
 3. Obsidian process running?
 4. `OBSIDIAN_API_KEY` set?
 5. `OBSIDIAN_MCP_PORT` set?
 6. `mcp__obsidian__vault_list` returns successfully?
 7. `_MANIFEST.md` exists in the vault?
-8. `CLAUDE.md` exists in the vault?
-9. `log.md` exists in the vault?
-10. `me/profile.md` exists with non-placeholder content?
-11. Standard folders present (brain/, entities/, inbox/, me/, archive/)?
-12. Scheduled tasks registered? (Code: `CronList`. Cowork: check `<workspace>/.scheduled-tasks/`)
-13. Last dream-protocol run successful? (Look at the most recent `dream-protocol` entry in `log.md`)
+8. `log.md` exists in the vault?
+9. `me/profile.md` exists with non-placeholder content?
+10. Standard folders present (brain/, entities/, inbox/, me/, archive/)?
+11. Scheduled tasks registered? (Code: `CronList`. Cowork: check `<workspace>/.scheduled-tasks/`)
+12. Last dream-protocol run successful? (Look at the most recent `dream-protocol` entry in `log.md`)
 
 Print a summary like:
 
@@ -715,14 +934,13 @@ secondbrain verification report:
   ✓ OBSIDIAN_MCP_PORT set (27124)
   ✓ MCP connection works
   ✓ _MANIFEST.md exists (last rebuilt 2026-04-08 02:00)
-  ✓ CLAUDE.md exists
   ✓ log.md exists (latest entry: 2026-04-09 02:00 dream-protocol)
   ✓ me/profile.md exists and has user content
   ✓ All standard folders present
   ✓ 6 scheduled tasks registered
   ✓ Last dream-protocol run: 2026-04-09 02:00 (clean)
 
-  All checks passed (13/13).
+  All checks passed (12/12).
 ```
 
 If any check fails, print the failing line in red with a specific fix command. Don't take any action — just report.
@@ -731,9 +949,10 @@ If any check fails, print the failing line in red with a specific fix command. D
 
 Every step in the full setup flow must check current state before acting:
 - Step 4 never overwrites existing files
+- Step 4a detects an existing git repo and skips re-init; `setup_git` handles the `.gitignore` and initial-commit steps idempotently; the with_push persistence is an add-or-update into vaults.json that collapses to a no-op if the flag is already correct
 - Step 5 uses `CronList` to detect already-installed tasks and skips them
 - Step 6 only re-prompts if `me/profile.md` still has placeholder content
-- Steps 7-9 are inherently idempotent (verification + dream-protocol)
+- Steps 7-10 are inherently idempotent (verification + dream-protocol + doctor)
 
 Re-running `/secondbrain:init` after a clean install should print: `Everything looks good. Run /secondbrain:init --verify for a detailed health check.`
 
@@ -743,22 +962,25 @@ Every step has fallback behavior:
 - If a write fails: print the error, ask if the user wants to retry or skip
 - If MCP connection drops mid-setup: print where you stopped, tell the user to fix and re-run `/init` (which will pick up where it left off due to idempotency)
 - If `CronCreate` fails (Code): note the failure, copy the task SKILL.md to `~/Documents/Claude/Scheduled/` anyway, and print the manual command the user can run via `/schedule` later
-- If `git init` fails: skip without error (git is optional)
 - If a prerequisite check is ambiguous: ask the user directly rather than guessing
 
 # Forbidden Actions
 
 - **Never** write to a file without permission, except files inside the vault scaffolding when the user has explicitly confirmed the vault path
 - **Never** run `chmod` or modify file permissions
-- **Never** modify existing `CLAUDE.md` content without the user's explicit confirmation (the seeding in Step 6 is the only exception, and only for new vault paths)
+- **Never** modify existing `me/profile.md` content beyond filling placeholders in Step 6 (seeding a fresh template). If the file already has real content, leave it alone.
+- **Never** touch a legacy plugin-generated `CLAUDE.md` in a user's vault. Since v3.3.3 the plugin no longer ships a CLAUDE.md template; existing files from v3.1.x–v3.3.2 installs are orphaned but harmless. Users can leave them, delete them, or wait for a future migration script to archive them. Do NOT delete or rewrite them on the user's behalf.
 - **Never** delete anything
+- **Never push to the remote without explicit user confirmation of the URL.** Step 4a is the only place the plugin learns about a vault remote; the user must supply the URL verbatim, it must pass the shape validation (`git@`, `https://`, `ssh://`, `file://`), and only then may the skill run `git push`. Never infer a remote from the environment, from git config, from recent SSH keys, or from anywhere else. Every push is a user-consented action or it doesn't happen at all.
 - **Never** silently fail — every error must be reported with a fix
 - **Never** assume the user has CLI knowledge (no `cd`, no `vim`, no shell tricks beyond `source ~/.zshrc`)
+- **Never claim setup is complete when doctor reports any non-skip failure.** Step 10 is the hard gate — the "Setup complete!" message may only be printed after `doctor_cli.py --diagnose` reports zero failures. If treatment (10c) leaves any failure unresolved, fall through to 10e and list the remaining issues. Do not print the success summary as a "close enough" approximation.
 
 # Implementation Notes
 
-- The 10-step flow is sequential — don't parallelize. The user's mental model is "I'm being walked through setup," which requires one thing at a time.
+- The step flow (Steps 0-10, plus Step 4a) is sequential — don't parallelize. The user's mental model is "I'm being walked through setup," which requires one thing at a time.
 - Wait for explicit user confirmation between steps. Don't barrel through without acknowledgment.
 - When asking the user to do something in Obsidian's UI, describe the click path with as much detail as possible (corner of screen, button label, etc.) — assume they've never used Obsidian before.
 - All `cron` strings are 5-field standard cron (`M H DoM Mon DoW`), as `CronCreate` expects.
 - For Cowork, the vault path detection is best-effort. If you can't auto-detect the workspace, ask the user where Cowork is allowed to read from.
+- Step 4a delegates git work to `secondbrain/scripts/vault_git.py` (low-level primitives) and `secondbrain/scripts/setup_steps.py::setup_git` (the idempotent composition of init + gitignore + initial commit + optional remote + optional push). Never shell out directly to `git` from the skill except where Step 4a explicitly documents it for remote add/push — otherwise you lose the `StepResult` reporting that doctor and the init report both depend on.

@@ -1,6 +1,8 @@
 # Ingest Routing Rules
 
-> Detailed routing table, entity creation template, and inbox processing rules.
+> Routing table and write-operation tool mapping for the ingest skill.
+> Shared write rules (entity templates, atomic sections, inbox processing)
+> live in the top-level references — see pointers at the bottom of this file.
 
 ## Input → Destination Mapping
 
@@ -27,68 +29,8 @@ All paths below are vault-relative — the plugin reads/writes via Obsidian MCP,
 | Replace text in file | vault_edit | Find-and-replace pattern |
 | Read file before writing | vault_read | Verify structure first |
 
-## Entity Creation Template
+## Shared Write Rules (pointers)
 
-When ingestion mentions a new entity not in `entities/`, create `entities/{kebab-name}.md`:
-
-```yaml
----
-type: person | company | organization | place | tool
-domains: [domain1, domain2]
-relationship: [how the user relates to this entity]
-created: [TODAY]
-updated: [TODAY]
----
-
-# [Entity Full Name]
-
-## Overview
-[1-2 sentence description]
-
-## Domains Involved
-[[domain1]], [[domain2]]
-
-## Contact Info (if person/company)
-- Email: [or "not stored"]
-- Phone: [or "not stored"]
-- Location: [if place]
-
-## Relationships
-- [[related-entity1]]
-- [[related-entity2]]
-```
-
-## Inbox Processing
-
-When session-start detects unprocessed files in `inbox/`:
-
-```
-FOR each file in inbox/:
-  1. Read file contents
-  2. Run through normal ingest routing
-  3. Add to vault (status.md/ideas/decisions/entities as appropriate)
-  4. After ALL items are routed, run:
-     python3 ${CLAUDE_PLUGIN_ROOT}/scripts/archive_inbox.py ${VAULT_PATH}
-     This moves processed inbox files to archive/inbox/
-  5. NEVER modify the original inbox file in place
-  6. NEVER delete inbox files — they are archived, not removed
-ENDFOR
-```
-
-## Atomic Section Format
-
-When writing to existing files, structure as atomic sections:
-
-```markdown
-## Section Heading — Descriptive Title
-
-Content here [[with]] [[wikilinks]].
-
-- Bullet point [[related-entity]]
-- Another bullet [[another-entity]]
-```
-
-Each section has:
-- Clear heading (descriptive, searchable)
-- Content (1-3 bullets or short paragraphs)
-- Wikilinks throughout
+- **Entity Creation Template:** see `@${CLAUDE_PLUGIN_ROOT}/references/templates.md` (Entity File section).
+- **Atomic Section Format:** see Rule 3 of `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`.
+- **Inbox Processing:** see `@${CLAUDE_PLUGIN_ROOT}/references/templates.md` (Inbox Processing section).

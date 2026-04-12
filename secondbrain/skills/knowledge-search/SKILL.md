@@ -7,7 +7,7 @@ description: >
   decisions, or timeline. Vault is source of truth — FORBIDDEN to answer from
   memory when vault has the answer.
 metadata:
-  version: "3.3.0"
+  version: "3.5.0"
 ---
 
 # Core Rule
@@ -17,12 +17,13 @@ metadata:
 # Prerequisites
 1. Read `_MANIFEST.md` for current vault state.
 2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
+3. For named DQL query patterns, read `@${CLAUDE_PLUGIN_ROOT}/references/dql-patterns.md`.
 
 # Search Strategy
 
 Find the answer — construct queries appropriate to the question type.
 
-Use DQL queries to find information whenever possible, and read files only if you need additional context, or initial context. The Vault uses Wikilinks to construct a knowledge graph that can be queried very easily. You should have already read `${CLAUDE_PLUGIN_ROOT}/references/` and know how to use it.
+Use DQL queries to find information whenever possible, and read files only if you need additional context or initial context. The vault uses wikilinks to construct a knowledge graph that can be queried directly. Named queries for common cases (`unprocessed-inbox`, `stale-tasks`, `approaching-deadlines`, `overdue-tasks`, `archive-candidates`) are defined in `@${CLAUDE_PLUGIN_ROOT}/references/dql-patterns.md` — reference them by name instead of rewriting the query text.
 
 | Question Type | Data Needed | Where to Look |
 |---------------|-------------|---------------|
@@ -84,7 +85,7 @@ I don't have anything on that in your vault.
 
 # Search Implementation Details
 
-**Timeline queries:** Search brain/deadlines.md -> brain/status.md [due::] -> domain folder -> CLAUDE.md milestones.
+**Timeline queries:** Search brain/deadlines.md -> brain/status.md [due::] -> domain folder -> brain/goals.md milestones.
 
 **Status queries:** Search brain/status.md -> domain/index.md -> extract urgency/blockers/progress.
 

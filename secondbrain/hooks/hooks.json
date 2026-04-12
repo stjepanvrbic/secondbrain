@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/emit-hot-memory.sh\"",
             "timeout": 10
           }
         ]
@@ -25,6 +25,16 @@
       }
     ],
     "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-mcp-only.sh\"",
+            "timeout": 5
+          }
+        ]
+      },
       {
         "matcher": "mcp__obsidian__vault_(create|update|patch|edit|edit_line|delete)",
         "hooks": [
@@ -48,12 +58,24 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "mcp__obsidian__vault_(create|update|patch|edit|edit_line|delete)",
+        "matcher": "mcp__obsidian__vault_(create|update|patch|edit|edit_line|delete)|Bash",
         "hooks": [
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/validate-after-write.sh\"",
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/on-stop.sh\"",
+            "timeout": 5
           }
         ]
       }
