@@ -51,6 +51,8 @@ CLI_ENTRYPOINT_ALLOWLIST = {
     "hot_memory_schema.py",    # library-only: imported by validate_hot_memory + update_hot_memory (T10)
     "validate_hot_memory.py",  # CLI entry: invoked by doctor/dream-protocol/ingester (wired up in T11/T13)
     "update_hot_memory.py",    # CLI entry: invoked by dream-protocol + ingest subagent (wired up in T11/T13)
+    "extract_new_turns.py",    # CLI entry: invoked by secondbrain-ingester subagent (wired up in T13)
+    "advance_cursor.py",       # CLI entry: invoked by secondbrain-ingester subagent (wired up in T13)
 }
 
 # Dirs the installer SHIPS to users. Nothing under here may contain dev cruft.
