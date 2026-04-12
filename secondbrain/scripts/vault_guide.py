@@ -27,7 +27,25 @@ TASK_RE = re.compile(r"^\s*- \[ \] ")
 DUE_RE = re.compile(r"\[due::\s*(\d{4}-\d{2}-\d{2})\s*\]")
 LOG_ENTRY_RE = re.compile(r"^## \[(\d{4}-\d{2}-\d{2})\s+\d{2}:\d{2}\]\s+(\S+)\s*\|\s*(.+)$")
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)")
-PROCESSED_RE = re.compile(r"\[processed::\s*true\s*\]", re.IGNORECASE)
+PROCESSED_INLINE_RE = re.compile(r"\[processed::\s*true\s*\]", re.IGNORECASE)
+
+
+def _has_processed_marker(text: str) -> bool:
+    """Check for 'processed: true' in either inline Dataview or YAML frontmatter."""
+    if PROCESSED_INLINE_RE.search(text):
+        return True
+    if text.lstrip().startswith("---"):
+        in_frontmatter = False
+        for line in text.split("\n"):
+            stripped = line.rstrip()
+            if stripped == "---":
+                if not in_frontmatter:
+                    in_frontmatter = True
+                    continue
+                break
+            if in_frontmatter and re.match(r"^processed:\s*true\s*$", stripped, re.IGNORECASE):
+                return True
+    return False
 
 
 def count_files(vault: Path) -> Dict[str, int]:
@@ -120,7 +138,7 @@ def count_inbox(vault: Path) -> Tuple[int, int]:
         total += 1
         try:
             text = f.read_text(encoding="utf-8", errors="replace")
-            if not PROCESSED_RE.search(text):
+            if not _has_processed_marker(text):
                 unprocessed += 1
         except OSError:
             unprocessed += 1

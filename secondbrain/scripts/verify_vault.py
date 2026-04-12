@@ -520,12 +520,29 @@ class ManifestDriftChecker:
         )
 
 
+def _has_processed_marker(text: str) -> bool:
+    """Check for 'processed: true' in either inline Dataview or YAML frontmatter."""
+    if re.search(r"\[processed::\s*true\s*\]", text, re.IGNORECASE):
+        return True
+    if text.lstrip().startswith("---"):
+        in_frontmatter = False
+        for line in text.split("\n"):
+            stripped = line.rstrip()
+            if stripped == "---":
+                if not in_frontmatter:
+                    in_frontmatter = True
+                    continue
+                break
+            if in_frontmatter and re.match(r"^processed:\s*true\s*$", stripped, re.IGNORECASE):
+                return True
+    return False
+
+
 class InboxStalenessChecker:
     """Flag inbox items older than a threshold that haven't been archived."""
 
     NAME = "inbox"
     STALE_DAYS = 7
-    PROCESSED_RE = re.compile(r"\[processed::\s*true\s*\]", re.IGNORECASE)
 
     def run(self, index: VaultIndex) -> CheckResult:
         inbox_dir = index.vault_root / "inbox"
@@ -551,7 +568,7 @@ class InboxStalenessChecker:
             if age_days >= self.STALE_DAYS:
                 try:
                     content = abs_path.read_text(encoding="utf-8", errors="replace")
-                    is_processed = bool(self.PROCESSED_RE.search(content))
+                    is_processed = _has_processed_marker(content)
                 except OSError:
                     is_processed = False
 

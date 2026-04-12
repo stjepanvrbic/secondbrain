@@ -941,6 +941,68 @@ def check_ingest_log_recent_failures(
     )
 
 
+def check_vault_verification(vault_path: Path) -> CheckResult:
+    """Run verify_vault.py's default checks (read-only) and report counts.
+
+    This surfaces vault content issues (broken wikilinks, stale inbox, orphans)
+    that only Dream Protocol can fix. Doctor reports the counts; Phase 2
+    escalates to /secondbrain:dream-protocol if the user confirms.
+    """
+    try:
+        import verify_vault  # type: ignore[reportMissingImports]
+    except ImportError:
+        return CheckResult(
+            name="vault_verification",
+            status="skip",
+            message="verify_vault.py not importable",
+            fixable=False,
+        )
+
+    try:
+        index = verify_vault.VaultIndex(vault_path)
+        checker_results = []
+        for name in verify_vault.DEFAULT_CHECKS:
+            checker_cls = verify_vault.ALL_CHECKERS.get(name)
+            if checker_cls:
+                checker_results.append(checker_cls().run(index))
+    except Exception as exc:
+        return CheckResult(
+            name="vault_verification",
+            status="warning",
+            message=f"verify_vault failed to run: {exc}",
+            fixable=False,
+        )
+
+    total_errors = sum(
+        sum(1 for i in r.issues if i.severity == "error")
+        for r in checker_results
+    )
+    total_warnings = sum(
+        sum(1 for i in r.issues if i.severity == "warning")
+        for r in checker_results
+    )
+
+    if total_errors == 0 and total_warnings == 0:
+        return CheckResult(
+            name="vault_verification",
+            status="pass",
+            message="vault verification: no errors or warnings",
+            fixable=False,
+        )
+
+    status = "fail" if total_errors > 0 else "warning"
+    return CheckResult(
+        name="vault_verification",
+        status=status,
+        message=(
+            f"vault verification: {total_errors} error(s), {total_warnings} warning(s) — "
+            f"run /secondbrain:dream-protocol to fix"
+        ),
+        fixable=False,
+        details={"errors": total_errors, "warnings": total_warnings},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
@@ -1033,6 +1095,7 @@ def run_all_checks(
             "manifest", "log_md", "profile", "standard_folders",
             "scheduled_tasks", "last_dream_protocol_run",
             "hot_memory_schema", "ingest_log_recent_failures",
+            "vault_verification",
         ):
             results.append(CheckResult(
                 name=name,
@@ -1062,6 +1125,9 @@ def run_all_checks(
 
         # Phase 2/3 deferred check
         results.append(check_ingest_log_recent_failures(vault_path))
+
+        # Vault content verification (read-only). Escalates to dream-protocol.
+        results.append(check_vault_verification(vault_path))
 
     # Check 15 — core.hooksPath (informational, needs the secondbrain repo root).
     if repo_root is not None:

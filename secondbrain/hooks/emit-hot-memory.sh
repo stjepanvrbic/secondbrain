@@ -112,6 +112,38 @@ if [ -z "${ACTIVE_VAULT}" ]; then
     exit 0
 fi
 
+# ---------------------------------------------------------------------------
+# Append a session-start entry to log.md so update_hot_memory.py's
+# "Recent Activity" reflects actual session activity. Without this,
+# the agent reports "N days without session" because only dream-protocol
+# writes to log.md (nightly), not sessions.
+# ---------------------------------------------------------------------------
+
+set +e
+python3 - "${ACTIVE_VAULT}" <<'PY'
+import sys
+from datetime import datetime
+from pathlib import Path
+
+vault = Path(sys.argv[1]) if len(sys.argv) > 1 else None
+if not vault or not vault.is_dir():
+    sys.exit(0)
+
+log = vault / "log.md"
+ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+entry = f"\n## [{ts}] session-activity | checkpoint\n"
+
+try:
+    if not log.exists():
+        log.write_text(f"# Log\n{entry}", encoding="utf-8")
+    else:
+        with log.open("a", encoding="utf-8") as f:
+            f.write(entry)
+except Exception:
+    pass
+PY
+set -e
+
 if [ ! -f "${EMITTER}" ]; then
     # Broken plugin layout. Still emit SOMETHING parseable.
     printf '%s\n' '{"systemMessage": "secondbrain emitter script missing. Run /secondbrain:doctor."}'

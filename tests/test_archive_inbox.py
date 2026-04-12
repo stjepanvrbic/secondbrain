@@ -145,6 +145,45 @@ class TestEdgeCases:
 # populated_vault integration
 # ---------------------------------------------------------------------------
 
+class TestYAMLFrontmatterFormat:
+    """Verify that YAML frontmatter `processed: true` is recognized."""
+
+    def test_moves_yaml_frontmatter_processed(self, tmp_vault: Path):
+        content = "---\nprocessed: true\nprocessed-date: 2026-04-12\nsource: inbox-sweep\n---\n# Note\n\nContent.\n"
+        make_processed(tmp_vault, "yaml.md", content=content)
+        code = main([str(tmp_vault)])
+        assert code == 0
+        assert not (tmp_vault / "inbox" / "yaml.md").exists()
+        archived = list((tmp_vault / "archive" / "inbox").rglob("yaml.md"))
+        assert len(archived) == 1
+
+    def test_yaml_frontmatter_case_insensitive(self, tmp_vault: Path):
+        content = "---\nProcessed: True\n---\n# Note\n"
+        make_processed(tmp_vault, "yaml_case.md", content=content)
+        main([str(tmp_vault)])
+        assert not (tmp_vault / "inbox" / "yaml_case.md").exists()
+
+    def test_ignores_processed_outside_frontmatter(self, tmp_vault: Path):
+        """processed: true in body text (not frontmatter) should not match YAML format."""
+        content = "# Note\n\nprocessed: true\n\nBut no frontmatter delimiters.\n"
+        (tmp_vault / "inbox" / "fake_yaml.md").write_text(content)
+        main([str(tmp_vault)])
+        assert (tmp_vault / "inbox" / "fake_yaml.md").exists()
+
+    def test_inline_format_still_works(self, tmp_vault: Path):
+        """Existing inline [processed:: true] format must still be recognized."""
+        make_processed(tmp_vault, "inline.md")
+        main([str(tmp_vault)])
+        assert not (tmp_vault / "inbox" / "inline.md").exists()
+
+    def test_preserves_yaml_content_after_archive(self, tmp_vault: Path):
+        content = "---\nprocessed: true\nsource: inbox-sweep\n---\n# Important\n\nData here.\n"
+        make_processed(tmp_vault, "preserve.md", content=content)
+        main([str(tmp_vault)])
+        archived = next((tmp_vault / "archive" / "inbox").rglob("preserve.md"))
+        assert archived.read_text() == content
+
+
 class TestPopulatedVault:
     def test_archives_processed_keeps_unprocessed(self, populated_vault: Path):
         code = main([str(populated_vault)])

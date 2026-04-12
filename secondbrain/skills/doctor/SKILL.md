@@ -109,6 +109,7 @@ question, and then **STOP**.
 | `hot_memory_schema` (Check 14, missing) | run `/secondbrain:dream-protocol` to regenerate `brain/hot-memory.md`, or `/secondbrain:init` if the vault has never been set up |
 | `hot_memory_schema` (Check 14, invalid) | run `/secondbrain:dream-protocol` to rebuild `brain/hot-memory.md` from scratch |
 | `ingest_log_recent_failures` (Check 16, warning) | investigate the specific failures listed |
+| `vault_verification` (Check 18) | run `/secondbrain:dream-protocol` to fix vault errors (wikilinks, inbox archiving, orphans) |
 
 # Phase 2 — Treat (Turn 2, ONLY on confirmation)
 
@@ -127,6 +128,12 @@ On confirmation:
    succeeded, which failed, and the new diagnostic state.
 4. For any remaining failures after Phase 2, escalate to the user with
    the appropriate manual action from the escalation table above.
+5. If `vault_verification` reported errors, ask the user: "Vault has N
+   errors. Want me to run Dream Protocol to fix them?" On confirmation,
+   invoke `/secondbrain:dream-protocol`. This is the only check that
+   requires a skill invocation rather than a CLI fix — the dream-protocol
+   runs verify_vault.py --fix, archives processed inbox files, fixes
+   wikilinks, and rebuilds the manifest.
 
 ## What Phase 2 does NOT do
 

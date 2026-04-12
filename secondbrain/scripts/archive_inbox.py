@@ -20,13 +20,31 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
 
-PROCESSED_RE = re.compile(r"\[processed::\s*true\s*\]", re.IGNORECASE)
+PROCESSED_INLINE_RE = re.compile(r"\[processed::\s*true\s*\]", re.IGNORECASE)
 BINARY_SUFFIXES = {".pptx", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".docx", ".xlsx", ".zip"}
+
+
+def _has_processed_marker(text: str) -> bool:
+    """Check for 'processed: true' in either inline Dataview or YAML frontmatter."""
+    if PROCESSED_INLINE_RE.search(text):
+        return True
+    if text.lstrip().startswith("---"):
+        in_frontmatter = False
+        for line in text.split("\n"):
+            stripped = line.rstrip()
+            if stripped == "---":
+                if not in_frontmatter:
+                    in_frontmatter = True
+                    continue
+                break
+            if in_frontmatter and re.match(r"^processed:\s*true\s*$", stripped, re.IGNORECASE):
+                return True
+    return False
 
 
 def is_processed(path: Path) -> bool:
     text = path.read_text(encoding="utf-8", errors="replace")
-    return bool(PROCESSED_RE.search(text))
+    return _has_processed_marker(text)
 
 
 def archive_dest(vault: Path, src: Path) -> Path:
