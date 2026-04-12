@@ -116,7 +116,7 @@ Hybrid of two ideas: a structural index (what folders exist, what files are in e
 
 ### `log.md` — the audit trail
 
-Append-only chronological log. Every vault-modifying operation (ingest, dream-protocol, session-end, weekly-review, etc.) appends one entry. Format:
+Append-only chronological log. Every vault-modifying operation (ingest, dream-protocol, weekly-review, the Stop-hook ingest subagent, etc.) appends one entry. Format:
 
 ```markdown
 ## [YYYY-MM-DD HH:MM] <operation> | <title>
@@ -151,30 +151,29 @@ Append-only means history is reconstructable forever. The `_MANIFEST.md` "Recent
 
 The biggest divergence is **life-management vs knowledge-management orientation**. Karpathy's gist describes building a personal wiki about topics; `secondbrain` is built around running your day, your week, your projects, and your relationships. Both work — they emphasize different things.
 
-Future versions may add an optional `sources/` layer (Karpathy-style raw curated documents) for users who want to use the plugin as a knowledge base alongside life management. Not in v3.3.x.
+Future versions may add an optional `sources/` layer (Karpathy-style raw curated documents) for users who want to use the plugin as a knowledge base alongside life management. Not in v3.5.x.
 
 ---
 
 ## Skill catalog
 
-The plugin ships 14 skills. Most run automatically when a relevant trigger fires; you rarely invoke them by name. `init` and `doctor` are the only skills users typically invoke explicitly (via `/secondbrain:init` and `/secondbrain:doctor`).
+The plugin ships 13 skills. Most run automatically when a relevant trigger fires; you rarely invoke them by name. `init` and `doctor` are the only skills users typically invoke explicitly (via `/secondbrain:init` and `/secondbrain:doctor`).
 
 | Skill | Purpose | Auto-invoked when |
 |---|---|---|
 | `init` | One-time setup wizard. Verifies prerequisites, scaffolds vault, installs scheduled tasks, seeds profile | User runs `/secondbrain:init` (explicit) |
-| `doctor` | Read-only 13-point diagnostic; reports pass/fail with fix commands. Never writes | User runs `/secondbrain:doctor` (explicit) |
-| `session-start` | Loads vault context, builds energy-matched day plan if morning | First action of every session (via `SessionStart` hook) |
-| `session-end` | Flushes session state to vault, appends `log.md` entry | User signals "done", or `SessionEnd` hook fires |
-| `ingest` | Routes brain dumps to vault with mandatory wikilinks | User pastes text, says "brain dump", or session-start finds unprocessed inbox files |
+| `doctor` | Two-turn diagnose-then-treat diagnostic. First turn reports pass/fail with fix commands; second turn applies the approved fixes | User runs `/secondbrain:doctor` (explicit) |
+| `ingest` | Routes brain dumps to vault with mandatory wikilinks. Also dispatched by the Stop hook via the `secondbrain-ingester` subagent to extract facts from each turn | User pastes text, says "brain dump", or Stop hook fires |
 | `knowledge-search` | Vault-backed query with citations | User asks about their own context (people, dates, decisions, status) |
-| `whats-next` | Picks ONE next task, energy-matched, no options | User asks "what's next" or starts a session without a task |
+| `whats-next` | Picks ONE next task, energy-matched, no options. Reads the cached `brain/morning-brief.md` when available | User asks "what's next" or starts a session without a task |
 | `email-triage` | Full agent reading of every email, extracts action items, archives noise | Scheduled task or user asks to check email (requires Gmail MCP) |
-| `morning-brief` | Process overnight inbox + build today's energy-matched plan | Scheduled at user's wakeup time |
+| `morning-brief` | Process overnight inbox + build today's energy-matched plan. Dispatched by the `secondbrain-morning-brief` subagent on its scheduled cron | Scheduled at user's wakeup time |
 | `deadline-check` | Lightweight midday scan, auto-promote urgent tasks | Scheduled at 1pm |
 | `end-of-day` | Review day vs plan, prompt for brain dump, flush state | Scheduled at evening shutdown time |
 | `weekly-review` | Full Sunday audit, build next week's plan | Scheduled Sunday 8pm |
-| `dream-protocol` | Nightly vault maintenance — lint, consolidate, rebuild manifest | Scheduled 2am (nightly) or invoked by `init` for first-time setup |
+| `dream-protocol` | Nightly vault maintenance — lint, consolidate, rebuild manifest, regenerate `brain/hot-memory.md` | Scheduled 2am (nightly) or invoked by `init` for first-time setup |
 | `vault-review` | On-demand vault audit (focused deadline review or full weekly audit) | User asks "how am I doing?", "what's overdue?", "audit my tasks", etc. |
+| `undo-last-turn` | Git-based recovery for "the last commit was wrong". Resets the vault to the previous Stop-hook commit | User asks to undo the last turn |
 
 Everything except `init` and `doctor` runs automatically based on hooks, schedules, and conversational triggers — the routing rules are injected by the `SessionStart` hook (via the nightly-built `brain/hot-memory.md`). Developer documentation lives in `secondbrain/docs/session-start-architecture.md`.
 

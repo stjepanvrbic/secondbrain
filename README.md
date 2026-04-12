@@ -95,7 +95,7 @@ brain dump: <anything>    # ingest something into the vault
 who am I                  # test knowledge search against your seeded profile
 ```
 
-The hooks fire automatically: the `SessionStart` hook injects pre-computed hot memory (`brain/hot-memory.md`) as a `systemMessage`, so the agent has your context loaded before you even finish typing. When you say "bye" or "done", `session-end` flushes everything to the vault. You don't manage the lifecycle — it runs itself.
+The hooks fire automatically: the `SessionStart` hook injects pre-computed hot memory (`brain/hot-memory.md`) as a `systemMessage`, so the agent has your context loaded before you even finish typing. After every turn the `Stop` hook commits your vault and dispatches the `secondbrain-ingester` subagent, which updates hot memory in the background. You don't manage the lifecycle — it runs itself.
 
 ---
 
@@ -131,7 +131,7 @@ v3 introduces a **script-first architecture**: deterministic tasks are handled b
 
 **Hook enforcement:** A `PostToolUse` hook (`hooks/validate-after-write.sh`) runs `verify_vault.py` after every vault write operation. If the script finds integrity errors, it blocks the agent with exit code 2 and forces it to fix the issues before continuing. The agent cannot skip validation.
 
-**Testing:** 374 tests across the `tests/` suite (pytest, zero external dependencies). All scripts tested on macOS, Windows, and Linux.
+**Testing:** 1128 tests across the `tests/` suite (pytest, zero external dependencies). All scripts tested on macOS, Windows, and Linux.
 
 ---
 
@@ -151,14 +151,13 @@ The architecture borrows the three-layer model from [Andrej Karpathy's gist on p
 
 ## Skills
 
-The plugin ships 14 skills. Most run automatically — you rarely invoke them by name.
+The plugin ships 13 skills. Most run automatically — you rarely invoke them by name.
 
 | Skill | Auto-invoked when |
 |---|---|
 | `init` | You run `/secondbrain:init` (one-time setup) |
-| `doctor` | You run `/secondbrain:doctor` for read-only health checks |
-| `session-end` | You signal "done", or SessionEnd hook fires |
-| `ingest` | You paste text, say "brain dump", or the SessionStart hook finds unprocessed inbox files |
+| `doctor` | You run `/secondbrain:doctor` for a two-turn diagnose-then-treat health check |
+| `ingest` | You paste text, say "brain dump", or the Stop hook dispatches the ingester subagent |
 | `knowledge-search` | You ask about your own context (people, dates, decisions, status) |
 | `whats-next` | You ask "what's next" or start a session without a task |
 | `email-triage` | Scheduled, or you ask to check email |
@@ -168,6 +167,7 @@ The plugin ships 14 skills. Most run automatically — you rarely invoke them by
 | `weekly-review` | Scheduled Sunday 8pm |
 | `dream-protocol` | Scheduled 2am |
 | `vault-review` | You ask for a manual audit |
+| `undo-last-turn` | You ask to undo the last turn's vault changes |
 
 ---
 
