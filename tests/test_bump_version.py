@@ -1,8 +1,9 @@
-"""Tests for bump_version.py — version consistency and bumping."""
+"""Tests for bump_version.py — version consistency, bumping, tagging, and release."""
 
 import json
 import textwrap
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
@@ -10,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / 
 from bump_version import (  # type: ignore[reportMissingImports]
     parse_version, bump_patch, set_version, get_all_versions,
     check_consistency, read_current_version, main,
+    create_tag, release,
 )
 
 
@@ -191,3 +193,106 @@ class TestMain:
             bump_version.REPO_ROOT = orig_root
             bump_version.VERSION_FILES = orig_files
             bump_version.SKILLS_DIR = orig_skills
+
+
+class TestCreateTag:
+    """Tests for the create_tag() function used in the release pipeline."""
+
+    def test_refuses_dirty_tree(self):
+        """create_tag must refuse if working tree has uncommitted changes."""
+        dirty_result = MagicMock()
+        dirty_result.stdout = "M some-file.py\n"
+
+        with patch("bump_version._git") as mock_git:
+            mock_git.return_value = dirty_result
+            rc = create_tag("9.9.9")
+        assert rc == 1
+
+    def test_refuses_existing_tag(self):
+        """create_tag must refuse if the tag already exists."""
+        call_count = 0
+
+        def fake_git(*args):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if args[0] == "status":
+                result.stdout = ""  # clean tree
+            elif args[0] == "tag" and args[1] == "-l":
+                result.stdout = "v9.9.9\n"  # tag exists
+            else:
+                result.stdout = ""
+            return result
+
+        with patch("bump_version._git", side_effect=fake_git), \
+             patch("bump_version.check_consistency", return_value=(True, ["ok"])):
+            rc = create_tag("9.9.9")
+        assert rc == 1
+
+    def test_happy_path(self):
+        """create_tag creates an annotated tag when preconditions are met."""
+        calls: list[tuple[str, ...]] = []
+
+        def fake_git(*args):
+            calls.append(args)
+            result = MagicMock()
+            if args[0] == "status":
+                result.stdout = ""  # clean tree
+            elif args[0] == "tag" and args[1] == "-l":
+                result.stdout = ""  # no existing tag
+            else:
+                result.stdout = ""
+            return result
+
+        with patch("bump_version._git", side_effect=fake_git), \
+             patch("bump_version.check_consistency", return_value=(True, ["ok"])):
+            rc = create_tag("9.9.9")
+        assert rc == 0
+        # Verify git tag -a was called
+        tag_calls = [c for c in calls if c[0] == "tag" and "-a" in c]
+        assert len(tag_calls) == 1
+        assert "v9.9.9" in tag_calls[0]
+
+
+class TestRelease:
+    """Tests for the release() function — full pipeline: bump + commit + tag."""
+
+    def test_release_bumps_commits_and_tags(self):
+        """release() must call set_version, git add, git commit, and create_tag."""
+        calls: list[tuple[str, ...]] = []
+
+        def fake_git(*args):
+            calls.append(args)
+            result = MagicMock()
+            result.stdout = ""
+            return result
+
+        with patch("bump_version._git", side_effect=fake_git), \
+             patch("bump_version.set_version", return_value=1) as mock_set, \
+             patch("bump_version.check_consistency", return_value=(True, ["ok"])), \
+             patch("bump_version.read_current_version", return_value="1.0.0"), \
+             patch("bump_version.create_tag", return_value=0) as mock_tag:
+            rc = release("2.0.0")
+
+        assert rc == 0
+        mock_set.assert_called_once_with("2.0.0")
+        mock_tag.assert_called_once_with("2.0.0")
+        # Verify git add -u and git commit were called
+        add_calls = [c for c in calls if c[0] == "add"]
+        commit_calls = [c for c in calls if c[0] == "commit"]
+        assert len(add_calls) == 1
+        assert len(commit_calls) == 1
+        assert "Bump to 2.0.0" in commit_calls[0][-1]
+
+    def test_release_auto_bumps_patch(self):
+        """release(None) should auto-bump the patch version."""
+        with patch("bump_version._git") as mock_git, \
+             patch("bump_version.set_version", return_value=1) as mock_set, \
+             patch("bump_version.check_consistency", return_value=(True, ["ok"])), \
+             patch("bump_version.read_current_version", return_value="3.5.0"), \
+             patch("bump_version.create_tag", return_value=0):
+            mock_git.return_value = MagicMock(stdout="")
+            rc = release(None)
+
+        assert rc == 0
+        mock_set.assert_called_once_with("3.5.1")

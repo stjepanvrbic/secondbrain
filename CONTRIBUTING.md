@@ -58,6 +58,18 @@ Looking for first issues? These are good entry points:
 
 ---
 
+## Releasing
+
+One command: `python3 secondbrain/scripts/bump_version.py --release`
+
+This bumps all version files, stages, commits, and creates an annotated git tag. Then `git push` carries everything (tags are pushed automatically via `push.followTags`). GitHub Actions creates a GitHub Release when the tag arrives.
+
+The pre-push hook blocks if you skip this — it enforces that a tag `v{version}` exists and is reachable from HEAD.
+
+**Why this matters:** Cowork's server-managed marketplace relies on git tags and GitHub releases to detect plugin updates. Versions without tags are invisible to Cowork. This pipeline ensures every push has a corresponding tag and release.
+
+---
+
 ## Commit messages
 
 Use conventional commits for the type prefix:

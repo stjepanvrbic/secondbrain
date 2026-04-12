@@ -9,9 +9,10 @@
 #
 # What this hook refuses to allow:
 #   1. version drift        — plugin.json / marketplace.json metadata.version / plugins[].version / SKILL.md all in lockstep
-#   2. stale version        — current version must be strictly greater than the last git tag
-#   3. manifest breakage    — test_plugin_manifest.py must pass
-#   4. any failing test     — the full pytest suite must pass
+#   2. stale version        — current version must be >= last git tag (passes if matching tag exists)
+#   3. missing version tag  — annotated tag v{version} must exist and be reachable from HEAD
+#   4. manifest breakage    — test_plugin_manifest.py must pass
+#   5. any failing test     — the full pytest suite must pass
 #
 # What this hook must NOT do:
 #   - NEVER `git commit --amend` during push. The old hook did that, which caused
@@ -55,7 +56,7 @@ python3 -c "import pytest" 2>/dev/null || fail "pytest not installed" \
 # -------------------------------------------------------------------------
 # 1. Version consistency across all files
 # -------------------------------------------------------------------------
-bold "pre-push: [1/4] version consistency check"
+bold "pre-push: [1/5] version consistency check"
 if ! python3 "$BUMP_SCRIPT" --check; then
     fail "version files are inconsistent" \
         "Fix with:" \
@@ -65,16 +66,22 @@ if ! python3 "$BUMP_SCRIPT" --check; then
 fi
 
 # -------------------------------------------------------------------------
-# 2. Version must be strictly greater than the last tag
+# 2. Version must be >= last tag (with tag for current version required)
 # -------------------------------------------------------------------------
-bold "pre-push: [2/4] version-beyond-last-tag check"
+bold "pre-push: [2/5] version-beyond-last-tag check"
 CURRENT_VERSION=$(python3 -c 'import json,sys; print(json.load(open("'"$PLUGIN_ROOT"'/.claude-plugin/plugin.json"))["version"])')
+EXPECTED_TAG="v$CURRENT_VERSION"
 LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
 
 if [ -n "$LAST_TAG" ]; then
     TAG_CLEAN="${LAST_TAG#v}"
-    # Compare semver tuples numerically. If identical OR current < tag, refuse.
-    if ! python3 - "$CURRENT_VERSION" "$TAG_CLEAN" <<'PY'
+    # If the current version has a matching tag reachable from HEAD, the
+    # version-vs-tag relationship is satisfied (we're on the tagged release).
+    # Only require strict > when there's no matching tag.
+    if git tag -l "$EXPECTED_TAG" | grep -q . && \
+       git merge-base --is-ancestor "$(git rev-list -n 1 "$EXPECTED_TAG")" HEAD 2>/dev/null; then
+        green "pre-push: version $CURRENT_VERSION has matching tag $EXPECTED_TAG"
+    elif ! python3 - "$CURRENT_VERSION" "$TAG_CLEAN" <<'PY'
 import sys
 def parse(v): return tuple(int(x) for x in v.split("."))
 cur = parse(sys.argv[1])
@@ -83,28 +90,46 @@ sys.exit(0 if cur > tag else 1)
 PY
     then
         fail "plugin version $CURRENT_VERSION is not strictly greater than last tag $LAST_TAG" \
-            "Bump with:" \
-            "    python3 secondbrain/scripts/bump_version.py" \
-            "    git add -u && git commit --amend --no-edit"
+            "Release with:" \
+            "    python3 secondbrain/scripts/bump_version.py --release"
+    else
+        green "pre-push: version $CURRENT_VERSION > tag $LAST_TAG"
     fi
-    green "pre-push: version $CURRENT_VERSION > tag $LAST_TAG"
 else
     green "pre-push: no tags yet, skipping tag-beyond check"
 fi
 
 # -------------------------------------------------------------------------
-# 3. Full plugin-manifest health check
+# 3. Tag for current version must exist
 # -------------------------------------------------------------------------
-bold "pre-push: [3/4] test_plugin_manifest.py (plugin structure health)"
+bold "pre-push: [3/5] version tag exists"
+if ! git tag -l "$EXPECTED_TAG" | grep -q .; then
+    fail "no tag $EXPECTED_TAG for current version $CURRENT_VERSION" \
+        "Release with:" \
+        "    python3 secondbrain/scripts/bump_version.py --release"
+fi
+TAG_COMMIT=$(git rev-list -n 1 "$EXPECTED_TAG")
+if ! git merge-base --is-ancestor "$TAG_COMMIT" HEAD; then
+    fail "tag $EXPECTED_TAG exists but points to commit $TAG_COMMIT which is not reachable from HEAD" \
+        "Delete and recreate:" \
+        "    git tag -d $EXPECTED_TAG" \
+        "    python3 secondbrain/scripts/bump_version.py --tag"
+fi
+green "pre-push: tag $EXPECTED_TAG exists and is reachable from HEAD"
+
+# -------------------------------------------------------------------------
+# 4. Full plugin-manifest health check
+# -------------------------------------------------------------------------
+bold "pre-push: [4/5] test_plugin_manifest.py (plugin structure health)"
 if ! python3 -m pytest "$TESTS_DIR/test_plugin_manifest.py" -q --no-header; then
     fail "plugin manifest tests failed — the plugin would ship broken" \
         "Fix the failures above, then push again."
 fi
 
 # -------------------------------------------------------------------------
-# 4. Full test suite
+# 5. Full test suite
 # -------------------------------------------------------------------------
-bold "pre-push: [4/4] full pytest suite"
+bold "pre-push: [5/5] full pytest suite"
 if ! python3 -m pytest "$TESTS_DIR" -q --no-header; then
     fail "tests failed — refusing to push"
 fi

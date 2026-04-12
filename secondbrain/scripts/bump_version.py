@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -138,6 +139,85 @@ def set_version(new_version: str) -> int:
     return changed
 
 
+def _git(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(REPO_ROOT), *args],
+        capture_output=True, text=True, check=True,
+    )
+
+
+def create_tag(version: str) -> int:
+    """Create an annotated git tag for the current version.
+
+    Preconditions (all enforced):
+      - working tree is clean
+      - all version references are consistent
+      - tag v{version} does not already exist
+    """
+    tag = f"v{version}"
+
+    # Working tree must be clean
+    status = _git("status", "--porcelain").stdout.strip()
+    if status:
+        print(f"error: working tree is dirty — commit or stash first",
+              file=sys.stderr)
+        return 1
+
+    # Version consistency
+    ok, messages = check_consistency()
+    if not ok:
+        for msg in messages:
+            print(msg, file=sys.stderr)
+        return 1
+
+    # Tag must not already exist
+    existing = _git("tag", "-l", tag).stdout.strip()
+    if existing:
+        print(f"error: tag {tag} already exists", file=sys.stderr)
+        return 1
+
+    # Create annotated tag (annotated so push.followTags picks it up)
+    _git("tag", "-a", tag, "-m", tag)
+    print(f"Created tag {tag}")
+    return 0
+
+
+def release(new_version: Optional[str] = None) -> int:
+    """Full release pipeline: bump files, commit, tag.
+
+    After this, the developer just runs `git push` and push.followTags
+    carries the tag. GitHub Actions creates the release.
+    """
+    current = read_current_version()
+    if new_version is None:
+        new_version = bump_patch(current)
+
+    # Bump version in all files
+    print(f"{current} -> {new_version}")
+    changed = set_version(new_version)
+    print(f"Updated {changed} files")
+
+    # Verify consistency
+    ok, messages = check_consistency()
+    for msg in messages:
+        print(msg)
+    if not ok:
+        return 1
+
+    # Stage and commit
+    _git("add", "-u")
+    _git("commit", "-m", f"Bump to {new_version}")
+    print(f"Committed version bump")
+
+    # Create tag
+    rc = create_tag(new_version)
+    if rc != 0:
+        return rc
+
+    print(f"\nReleased v{new_version}. Push with: git push")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
 
@@ -147,12 +227,23 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(msg)
         return 0 if ok else 1
 
-    current = read_current_version()
+    if "--tag" in args:
+        version = read_current_version()
+        return create_tag(version)
 
-    if args and not args[0].startswith("-"):
-        new_version = args[0]
-    else:
-        new_version = bump_patch(current)
+    # Extract explicit version from args (first non-flag argument)
+    explicit_version = None
+    for a in args:
+        if not a.startswith("-"):
+            explicit_version = a
+            break
+
+    if "--release" in args:
+        return release(explicit_version)
+
+    # Plain bump (no commit, no tag) — for edge cases
+    current = read_current_version()
+    new_version = explicit_version if explicit_version else bump_patch(current)
 
     print(f"{current} -> {new_version}")
     changed = set_version(new_version)

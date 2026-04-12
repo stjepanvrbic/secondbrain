@@ -189,27 +189,57 @@ class TestVersionConsistency:
         for p in parts:
             assert p.isdigit(), f"version component {p!r} is not numeric"
 
-    def test_version_strictly_greater_than_last_tag(self):
-        """Fresh pushes must bump beyond the last released tag."""
+    def test_version_tag_relationship(self):
+        """Version must either match a reachable tag or be greater than the last tag.
+
+        Once we tag every release, the normal state is: a tag v{version} exists
+        on HEAD (or an ancestor). If not, it means we're developing toward a new
+        version and it must be strictly greater than the last tag.
+        """
+        pj = load_json(PLUGIN_JSON)
+        current_str = pj["version"]
+        current = parse_semver(current_str)
+        expected_tag = f"v{current_str}"
+
+        # Check if a matching tag exists and is reachable from HEAD
+        tag_exists = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "tag", "-l", expected_tag],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        if tag_exists:
+            # Tag exists — verify it's reachable from HEAD
+            tag_commit = subprocess.run(
+                ["git", "-C", str(REPO_ROOT), "rev-list", "-n", "1", expected_tag],
+                capture_output=True, text=True, check=True,
+            ).stdout.strip()
+            result = subprocess.run(
+                ["git", "-C", str(REPO_ROOT), "merge-base", "--is-ancestor",
+                 tag_commit, "HEAD"],
+            )
+            assert result.returncode == 0, (
+                f"tag {expected_tag} exists but is not reachable from HEAD"
+            )
+            return  # Tagged release — relationship is valid
+
+        # No matching tag — version must be strictly greater than the last tag
         try:
-            tag = subprocess.run(
+            last_tag = subprocess.run(
                 ["git", "-C", str(REPO_ROOT), "describe", "--tags", "--abbrev=0"],
                 capture_output=True, text=True, check=True,
             ).stdout.strip()
         except subprocess.CalledProcessError:
             pytest.skip("no git tags yet")
-        if not tag:
+        if not last_tag:
             pytest.skip("no git tags yet")
-        tag_clean = tag.lstrip("v")
+        tag_clean = last_tag.lstrip("v")
         try:
             tag_version = parse_semver(tag_clean)
         except (ValueError, IndexError):
-            pytest.skip(f"last tag {tag!r} isn't semver")
-        pj = load_json(PLUGIN_JSON)
-        current = parse_semver(pj["version"])
+            pytest.skip(f"last tag {last_tag!r} isn't semver")
         assert current > tag_version, (
-            f"plugin.json version {pj['version']} must be strictly greater than "
-            f"last released tag {tag} — bump_version.py before tagging"
+            f"plugin.json version {current_str} has no matching tag and is not "
+            f"strictly greater than last tag {last_tag} — "
+            f"run: python3 secondbrain/scripts/bump_version.py --release"
         )
 
 
@@ -345,6 +375,56 @@ class TestGitHooksInstallable:
         assert installer.is_file(), (
             "missing scripts/install_git_hooks.py — contributors have no way to "
             "wire core.hooksPath without it."
+        )
+
+
+class TestTagHygiene:
+    """Enforce that git tags follow conventions and release tooling exists."""
+
+    def test_tag_format_is_v_prefixed_semver(self):
+        """Every tag in the repo must be v-prefixed semver."""
+        r = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "tag", "-l"],
+            capture_output=True, text=True, check=True,
+        )
+        tags = [t.strip() for t in r.stdout.splitlines() if t.strip()]
+        for tag in tags:
+            assert tag.startswith("v"), (
+                f"tag {tag!r} must start with 'v' (convention: vX.Y.Z)"
+            )
+            parts = tag.lstrip("v").split(".")
+            assert len(parts) == 3 and all(p.isdigit() for p in parts), (
+                f"tag {tag!r} is not valid semver (expected vX.Y.Z)"
+            )
+
+    def test_bump_version_has_create_tag(self):
+        """bump_version.py must expose create_tag for the release workflow."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "bump_version",
+            REPO_ROOT / "secondbrain" / "scripts" / "bump_version.py",
+        )
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        assert hasattr(mod, "create_tag"), (
+            "bump_version.py must have a create_tag() function — "
+            "tags are part of the release workflow"
+        )
+
+    def test_bump_version_has_release(self):
+        """bump_version.py must expose release for the automated pipeline."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "bump_version",
+            REPO_ROOT / "secondbrain" / "scripts" / "bump_version.py",
+        )
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        assert hasattr(mod, "release"), (
+            "bump_version.py must have a release() function — "
+            "the --release flag depends on it"
         )
 
 

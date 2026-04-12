@@ -131,6 +131,18 @@ Cowork is sandboxed. The vault path must be in the `localAgentModeTrustedFolders
 
 If the vault isn't trusted, Cowork can't read or write it. The init skill detects this and walks the user through adding it.
 
+## Marketplace update mechanism
+
+### Claude Code
+
+Claude Code maintains a local git clone at `~/.claude/plugins/marketplaces/secondbrain/`. Updates are detected via `git fetch` + comparing `metadata.version` in marketplace.json. This works reliably because the local clone has full history.
+
+### Cowork
+
+Cowork's marketplace is server-managed (marketplaceId-based). The plugin is NOT cloned locally by Cowork — the server maintains a clone and syncs it to connected clients. If the server clone becomes stale (no tags pushed, or history disrupted by a force-push), Cowork reports "already up to date" even when the repo has advanced.
+
+**Tags and GitHub releases are the reliable signals that trigger the server to refresh.** The `bump_version.py --release` pipeline and pre-push hook enforce that every push has a corresponding annotated tag. GitHub Actions creates a release when the tag arrives.
+
 ## Platform paths (macOS / Linux / Windows)
 
 | Path | macOS | Linux | Windows |

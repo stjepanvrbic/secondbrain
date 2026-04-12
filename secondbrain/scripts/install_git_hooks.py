@@ -43,6 +43,13 @@ def current_hooks_path() -> str | None:
         return None
 
 
+def follow_tags_enabled() -> bool:
+    try:
+        return git("config", "--get", "push.followTags") == "true"
+    except subprocess.CalledProcessError:
+        return False
+
+
 def check() -> int:
     """Exit 0 if hooksPath is set correctly AND every expected hook exists + is executable."""
     current = current_hooks_path()
@@ -52,6 +59,11 @@ def check() -> int:
     if current != expected:
         problems.append(
             f"core.hooksPath is {current!r}, expected {expected!r}"
+        )
+
+    if not follow_tags_enabled():
+        problems.append(
+            "push.followTags is not 'true' — annotated tags won't be pushed automatically"
         )
 
     for hook in EXPECTED_HOOKS:
@@ -82,6 +94,11 @@ def install() -> int:
     # and worktrees.
     relative = str(HOOKS_DIR.relative_to(REPO_ROOT))
     git("config", "core.hooksPath", relative)
+
+    # Ensure `git push` carries annotated tags automatically. Without this,
+    # tags created by `bump_version.py --release` stay local and Cowork's
+    # server-managed marketplace never sees them.
+    git("config", "push.followTags", "true")
 
     # Make sure every expected hook is executable (matters after a fresh clone
     # on systems where +x wasn't preserved).
