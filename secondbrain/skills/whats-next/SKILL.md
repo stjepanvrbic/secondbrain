@@ -6,7 +6,7 @@ description: >
   "I'm back" or "ready to go", or when a session starts without a clear task.
   Serves ONE task with micro-steps and energy matching. FORBIDDEN to present options.
 metadata:
-  version: "3.5.8"
+  version: "3.5.9"
 ---
 
 # Core Rule

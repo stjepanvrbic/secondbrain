@@ -8,7 +8,7 @@ description: >
   after every turn). ALWAYS confirms with the user before doing anything
   destructive — this skill is a one-way lossy operation.
 metadata:
-  version: "3.5.8"
+  version: "3.5.9"
 ---
 
 # Core Rule
