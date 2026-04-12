@@ -58,7 +58,6 @@ SANCTIONED_SCRIPTS = {
     "update_hot_memory.py",
     "extract_new_turns.py",
     "advance_cursor.py",
-    "log_session_end.py",
     "emit_hot_memory.py",
     "setup_steps.py",
     "init_obsidian.py",
