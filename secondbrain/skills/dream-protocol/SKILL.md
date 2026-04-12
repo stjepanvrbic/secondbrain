@@ -7,7 +7,7 @@ description: >
   Performs a reflective consolidation pass over the vault — orienting on current
   state, gathering recent signal, consolidating changes, and verifying integrity.
 metadata:
-  version: "3.5.2"
+  version: "3.5.3"
 ---
 
 # Core Rule
