@@ -104,6 +104,18 @@ if [ "$NEEDS_BUMP" = "true" ]; then
     bold "pre-push: auto-bumping (HEAD has commits past last release)"
     python3 "$BUMP_SCRIPT" --release
     NEW_VERSION=$(python3 -c 'import json,sys; print(json.load(open("'"$PLUGIN_ROOT"'/.claude-plugin/plugin.json"))["version"])')
+
+    # Delete ALL local tags except the one just created. push.followTags
+    # pushes every annotated tag pointing to a pushed commit — intermediate
+    # tags from previous auto-bump attempts would cause Cowork to step
+    # through versions instead of jumping to latest.
+    NEW_TAG="v$NEW_VERSION"
+    for OLD in $(git tag -l); do
+        if [ "$OLD" != "$NEW_TAG" ]; then
+            git tag -d "$OLD" >/dev/null 2>&1 || true
+        fi
+    done
+
     bold ""
     bold "pre-push: auto-bumped to v$NEW_VERSION and tagged"
     bold "pre-push: run 'git push' again to include the version bump"

@@ -48,4 +48,13 @@ gh release list --json tagName --jq '.[].tagName' 2>/dev/null | while read -r OL
     fi
 done
 
+# Delete old tags from remote. Cowork's marketplace uses tags to detect
+# versions — multiple tags cause it to step through each one instead of
+# jumping to latest. Keep only the current tag.
+for OLD_TAG in $(git ls-remote --tags origin 2>/dev/null | sed 's/.*refs\/tags\///' | grep -v '\^{}'); do
+    if [ "$OLD_TAG" != "$TAG" ]; then
+        git push origin --delete "refs/tags/$OLD_TAG" 2>/dev/null || true
+    fi
+done
+
 exit 0
