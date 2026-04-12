@@ -8,7 +8,7 @@ description: >
   the main agent does NOT read the brain dump into its own context to do
   routing or extraction.
 metadata:
-  version: "3.5.0"
+  version: "3.5.1"
 ---
 
 # Core Rule
