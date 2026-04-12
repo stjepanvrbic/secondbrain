@@ -50,7 +50,7 @@ All wiki pages with one-line summaries. Maintained by dream-protocol nightly.
 
 | File | Purpose |
 |------|---------|
-| [[me/profile]] | User bio, daily rhythms, static preferences (loaded by session-start) |
+| [[me/profile]] | User bio, daily rhythms, static preferences (referenced by hot-memory) |
 | [[glossary]] | Acronyms, shorthand, nicknames |
 | [[_MANIFEST]] | This file |
 

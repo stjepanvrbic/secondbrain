@@ -721,13 +721,19 @@ def check_vault_identity_cross(
 
 
 def check_hot_memory_schema(vault_path: Path, plugin_root: Path) -> CheckResult:
-    """Check 14 (new): hot-memory file validates against schema.
+    """Check 14: `brain/hot-memory.md` validates against the T10 schema.
 
-    Phase 3 introduces a hot-memory module — for Phase 1 we gracefully
-    degrade when that module doesn't exist yet, returning `skip` with a
-    note explaining why. Presence of `validate_hot_memory.py` at
-    `${plugin_root}/secondbrain/scripts/` is the signal that Phase 3 has
-    landed.
+    As of T11 the hot-memory file lives at `<vault>/brain/hot-memory.md`
+    (NOT the old `.secondbrain/hot-memory.json` placeholder) and is validated
+    via `validate_hot_memory.py --quiet <path>`.
+
+    Behavior:
+      - `validate_hot_memory.py` missing at the expected script path → skip
+        with explanation (usually means a partial install).
+      - hot-memory file missing → fail with a pointer to dream-protocol.
+      - hot-memory file present but invalid → fail with the validator's
+        stderr captured in the message.
+      - All-good → pass.
     """
     validator = plugin_root / "secondbrain" / "scripts" / "validate_hot_memory.py"
     if not validator.exists():
@@ -735,40 +741,67 @@ def check_hot_memory_schema(vault_path: Path, plugin_root: Path) -> CheckResult:
             name="hot_memory_schema",
             status="skip",
             message=(
-                "hot-memory check deferred to Phase 3 "
-                "(validate_hot_memory.py not present yet)"
+                "validate_hot_memory.py is not present at "
+                f"{validator}. Skipping the hot-memory check — the plugin "
+                "may be only partially installed."
             ),
             fixable=False,
         )
 
-    hot_memory = vault_path / ".secondbrain" / "hot-memory.json"
+    hot_memory = vault_path / "brain" / "hot-memory.md"
     if not hot_memory.exists():
         return CheckResult(
             name="hot_memory_schema",
             status="fail",
             message=(
                 f"hot-memory file missing at {hot_memory}. Run "
-                "/secondbrain:dream-protocol or /secondbrain:session-start "
-                "to populate it."
+                "/secondbrain:dream-protocol to regenerate it, or "
+                "/secondbrain:init if the vault has never been set up."
             ),
             fixable=False,
         )
 
-    # Phase 3 will provide a real validator; for now, just confirm it's
-    # parseable JSON. When Phase 3 lands, doctor calls the real validator.
+    # Delegate to the real validator so doctor and dream-protocol share one
+    # source of truth on what "valid" means.
     try:
-        json.loads(hot_memory.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
+        r = subprocess.run(
+            [
+                sys.executable,
+                str(validator),
+                "--quiet",
+                str(hot_memory),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
         return CheckResult(
             name="hot_memory_schema",
             status="fail",
-            message=f"hot-memory.json is invalid JSON: {exc}",
+            message=f"validate_hot_memory.py failed to run: {exc}",
             fixable=False,
         )
+
+    if r.returncode != 0:
+        err_snippet = (r.stderr or r.stdout or "").strip().splitlines()
+        first_line = err_snippet[0] if err_snippet else "unknown error"
+        return CheckResult(
+            name="hot_memory_schema",
+            status="fail",
+            message=(
+                f"hot-memory failed validation: {first_line}. "
+                "Run /secondbrain:dream-protocol to rebuild, or "
+                "/secondbrain:doctor --fix once that's wired up."
+            ),
+            fixable=False,
+        )
+
     return CheckResult(
         name="hot_memory_schema",
         status="pass",
-        message="hot-memory.json is parseable (full schema validation in Phase 3)",
+        message=f"hot-memory.md validates cleanly at {hot_memory}",
         fixable=False,
     )
 

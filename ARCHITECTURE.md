@@ -56,13 +56,13 @@ The architecture follows a **three-layer pattern** that's been described in diff
 
 | Layer | Purpose | Who writes it | Examples |
 |---|---|---|---|
-| **Schema** | Configuration | Plugin-owned + human-curated | Plugin-injected routing rules (via the `SessionStart` hook + `references/session-start-bootstrap.md`); `me/profile.md`; `glossary.md` |
+| **Schema** | Configuration | Plugin-owned + human-curated | Plugin-injected routing rules (via the `SessionStart` hook emitting `brain/hot-memory.md` as a `systemMessage`); `me/profile.md`; `glossary.md` |
 | **Wiki** | Agent-maintained memory | Agent (under schema rules) | `brain/`, `entities/`, `log.md`, `_MANIFEST.md` |
 | **Raw Sources** | Unprocessed input | Human (via brain dumps) | `inbox/`, optional `sources/` |
 
 The schema layer has two sub-parts:
 
-- **Plugin-owned rules** — injected at every session start by the `SessionStart` hook as a compact `systemMessage`, with the verbose authoritative copy in `secondbrain/references/session-start-bootstrap.md`. These ship with the plugin and are updated via plugin releases, not user edits.
+- **Plugin-owned rules** — injected at every session start by the `SessionStart` hook (`hooks/emit-hot-memory.sh`), which reads the pre-computed `brain/hot-memory.md` from the active vault and emits it as a `systemMessage`. Hot memory is rebuilt nightly by `dream-protocol` and incrementally by the ingest subagent after each session. Developer documentation lives in `secondbrain/docs/session-start-architecture.md`.
 - **User-curated profile** — `me/profile.md` holds the user's bio, daily rhythms, and preferences. Seeded by `/secondbrain:init` and refined organically through conversation. `glossary.md` (terms/acronyms/shorthand) is also user-curated.
 
 Older plugin versions (v3.1.x–v3.3.2) shipped a `CLAUDE.md` template at the vault root. Since v3.3.3 that file is no longer scaffolded — its contents were split between the plugin-injected rules and `me/profile.md`. Any legacy `CLAUDE.md` sitting in a user's vault is orphaned but harmless; the plugin never touches it.
@@ -176,7 +176,7 @@ The plugin ships 14 skills. Most run automatically when a relevant trigger fires
 | `dream-protocol` | Nightly vault maintenance — lint, consolidate, rebuild manifest | Scheduled 2am (nightly) or invoked by `init` for first-time setup |
 | `vault-review` | On-demand vault audit (focused deadline review or full weekly audit) | User asks "how am I doing?", "what's overdue?", "audit my tasks", etc. |
 
-Everything except `init` and `doctor` runs automatically based on hooks, schedules, and conversational triggers — the routing rules are injected by the `SessionStart` hook and fully specified in `secondbrain/references/session-start-bootstrap.md`.
+Everything except `init` and `doctor` runs automatically based on hooks, schedules, and conversational triggers — the routing rules are injected by the `SessionStart` hook (via the nightly-built `brain/hot-memory.md`). Developer documentation lives in `secondbrain/docs/session-start-architecture.md`.
 
 ---
 

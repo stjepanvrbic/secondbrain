@@ -3,7 +3,7 @@ name: ingest
 description: >
   This skill should be used when the user sends a "brain dump", "random thoughts",
   unstructured text with multiple pieces of info, copy-pasted content from email
-  or Slack, screenshots, voice transcripts, or when session-start detects
+  or Slack, screenshots, voice transcripts, or when the SessionStart hook surfaces
   unprocessed inbox files. Routes raw input to structured vault entries with
   mandatory wikilink enforcement.
 metadata:

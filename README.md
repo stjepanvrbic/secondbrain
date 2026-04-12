@@ -95,7 +95,7 @@ brain dump: <anything>    # ingest something into the vault
 who am I                  # test knowledge search against your seeded profile
 ```
 
-The hooks fire automatically, so as soon as you say something the `session-start` skill loads your context. When you say "bye" or "done", `session-end` flushes everything to the vault. You don't manage the lifecycle — it runs itself.
+The hooks fire automatically: the `SessionStart` hook injects pre-computed hot memory (`brain/hot-memory.md`) as a `systemMessage`, so the agent has your context loaded before you even finish typing. When you say "bye" or "done", `session-end` flushes everything to the vault. You don't manage the lifecycle — it runs itself.
 
 ---
 
@@ -157,9 +157,8 @@ The plugin ships 14 skills. Most run automatically — you rarely invoke them by
 |---|---|
 | `init` | You run `/secondbrain:init` (one-time setup) |
 | `doctor` | You run `/secondbrain:doctor` for read-only health checks |
-| `session-start` | First action of every session (via hook) |
 | `session-end` | You signal "done", or SessionEnd hook fires |
-| `ingest` | You paste text, say "brain dump", or session-start finds unprocessed inbox files |
+| `ingest` | You paste text, say "brain dump", or the SessionStart hook finds unprocessed inbox files |
 | `knowledge-search` | You ask about your own context (people, dates, decisions, status) |
 | `whats-next` | You ask "what's next" or start a session without a task |
 | `email-triage` | Scheduled, or you ask to check email |

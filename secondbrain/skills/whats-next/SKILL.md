@@ -105,7 +105,7 @@ Zero judgment. Move forward immediately.
 
 ```
 IF first session of day around 10:30am:
-  1. Load all context (session-start already did this)
+  1. Load all context (the SessionStart hook already injected hot memory)
   2. Scan overnight changes
   3. Assess today: what MUST happen? What's blocked?
   4. Build day plan: 3-5 tasks matched to energy rhythm

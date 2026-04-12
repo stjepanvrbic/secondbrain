@@ -119,7 +119,7 @@ updated: [TODAY]
 # Status
 
 ## Current Focus
-Not set — run session-start to begin.
+Not set — start a session or run `/secondbrain:whats-next` to begin.
 
 ## Blockers
 None identified.

@@ -504,44 +504,71 @@ class TestCheckVaultIdentityCross:
 
 
 # ---------------------------------------------------------------------------
-# check_hot_memory_schema — Check 14 (NEW, deferred to Phase 3)
+# check_hot_memory_schema — Check 14 (T11: reads brain/hot-memory.md)
 # ---------------------------------------------------------------------------
 
 class TestCheckHotMemorySchema:
-    def test_skip_when_phase3_module_missing(self, tmp_path: Path):
+    """T11 repoints this check at <vault>/brain/hot-memory.md and has it
+    shell out to the real `validate_hot_memory.py --quiet` script."""
+
+    def _real_plugin_root(self) -> Path:
+        """Return the live repo plugin root so `validate_hot_memory.py`
+        exists and can actually be invoked."""
+        return Path(__file__).resolve().parent.parent
+
+    def test_skip_when_validator_missing(self, tmp_path: Path):
+        """Partial install → skip with a clear explanation."""
         plugin_root = tmp_path / "plugin"
         plugin_root.mkdir()
-        # No validate_hot_memory.py → skip gracefully
+        # No validate_hot_memory.py present at all.
         r = check_hot_memory_schema(tmp_path, plugin_root)
         assert r.status == "skip"
-        assert "phase 3" in r.message.lower() or "deferred" in r.message.lower()
+        assert (
+            "validate_hot_memory" in r.message
+            or "not present" in r.message.lower()
+            or "partial" in r.message.lower()
+        )
 
-    def test_fail_when_module_present_but_file_missing(self, tmp_path: Path):
-        plugin_root = tmp_path / "plugin"
-        plugin_root.mkdir()
-        scripts = plugin_root / "secondbrain" / "scripts"
-        scripts.mkdir(parents=True)
-        (scripts / "validate_hot_memory.py").write_text("# phase 3 module\n")
-
+    def test_fail_when_validator_present_but_file_missing(self, tmp_path: Path):
+        """Hot-memory file missing in the new location → fail with a pointer."""
+        plugin_root = self._real_plugin_root()
         vault = tmp_path / "vault"
-        vault.mkdir()
-        # No hot-memory file present
+        (vault / "brain").mkdir(parents=True)
+        # No brain/hot-memory.md — the file is what's missing.
         r = check_hot_memory_schema(vault, plugin_root)
-        assert r.status in ("fail", "warning")
+        assert r.status == "fail"
+        assert "hot-memory" in r.message.lower()
+        assert "brain/hot-memory.md" in r.message or "brain" in r.message
 
-    def test_pass_when_module_and_file_both_present(self, tmp_path: Path):
-        plugin_root = tmp_path / "plugin"
-        scripts = plugin_root / "secondbrain" / "scripts"
-        scripts.mkdir(parents=True)
-        (scripts / "validate_hot_memory.py").write_text("# phase 3 module\n")
+    def test_pass_when_file_valid(self, tmp_path: Path):
+        """A valid hot-memory.md (INITIAL_TEMPLATE) should pass."""
+        import sys
+        sys.path.insert(
+            0,
+            str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"),
+        )
+        from hot_memory_schema import INITIAL_TEMPLATE  # type: ignore[reportMissingImports]
 
+        plugin_root = self._real_plugin_root()
         vault = tmp_path / "vault"
-        (vault / ".secondbrain").mkdir(parents=True)
-        (vault / ".secondbrain" / "hot-memory.json").write_text("{}\n")
+        (vault / "brain").mkdir(parents=True)
+        (vault / "brain" / "hot-memory.md").write_text(INITIAL_TEMPLATE)
         r = check_hot_memory_schema(vault, plugin_root)
-        # Without a real validator, we accept "pass" OR "skip" — the key
-        # invariant is it doesn't crash.
-        assert r.status in ("pass", "skip", "warning")
+        assert r.status == "pass"
+
+    def test_fail_when_file_invalid(self, tmp_path: Path):
+        """A malformed hot-memory.md fails — no frontmatter means the schema
+        rejects it and doctor reports a specific error."""
+        plugin_root = self._real_plugin_root()
+        vault = tmp_path / "vault"
+        (vault / "brain").mkdir(parents=True)
+        (vault / "brain" / "hot-memory.md").write_text(
+            "# this has no frontmatter and no required sections\n"
+        )
+        r = check_hot_memory_schema(vault, plugin_root)
+        assert r.status == "fail"
+        # Message should hint at what's wrong.
+        assert "validation" in r.message.lower() or "hot-memory" in r.message.lower()
 
 
 # ---------------------------------------------------------------------------

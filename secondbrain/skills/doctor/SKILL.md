@@ -106,7 +106,8 @@ question, and then **STOP**.
 | `scheduled_tasks` (Check 12) | run `/secondbrain:init` to install tasks |
 | `last_dream_protocol_run` (Check 13, warning) | run `/secondbrain:dream-protocol` manually |
 | `core_hooks_path` (Check 15) | run `python3 secondbrain/scripts/install_git_hooks.py` from the repo |
-| `hot_memory_schema` (Check 14) | Phase 3 feature — skip silently until Phase 3 ships |
+| `hot_memory_schema` (Check 14, missing) | run `/secondbrain:dream-protocol` to regenerate `brain/hot-memory.md`, or `/secondbrain:init` if the vault has never been set up |
+| `hot_memory_schema` (Check 14, invalid) | run `/secondbrain:dream-protocol` to rebuild `brain/hot-memory.md` from scratch |
 | `ingest_log_recent_failures` (Check 16, warning) | investigate the specific failures listed |
 
 # Phase 2 — Treat (Turn 2, ONLY on confirmation)

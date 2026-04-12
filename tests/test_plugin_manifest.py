@@ -85,7 +85,7 @@ def hook_commands(hooks_json: dict) -> list[str]:
 
 def resolve_command_script(cmd: str) -> Path | None:
     """
-    Given a hook command like `"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"`,
+    Given a hook command like `"${CLAUDE_PLUGIN_ROOT}/hooks/emit-hot-memory.sh"`,
     resolve it to a real path inside the repo. Returns None if no ${CLAUDE_PLUGIN_ROOT}.
     """
     m = re.search(r'\$\{?CLAUDE_PLUGIN_ROOT\}?([^"\' ]+)', cmd)

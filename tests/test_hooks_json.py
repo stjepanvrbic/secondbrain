@@ -151,18 +151,46 @@ class TestStopMatcher:
 
 
 # ---------------------------------------------------------------------------
-# SessionStart / SessionEnd — must remain unchanged (Phase 3 owns the rewrite)
+# SessionStart / SessionEnd — Phase 3 (T11) rewires SessionStart to
+# emit-hot-memory.sh. SessionEnd is still session-end.sh.
 # ---------------------------------------------------------------------------
 
-class TestSessionHooksUntouched:
-    def test_session_start_still_wires_session_start_sh(self):
+class TestSessionStartWiring:
+    def test_session_start_wires_emit_hot_memory_sh(self):
+        """T11 replaced session-start.sh with emit-hot-memory.sh."""
         data = _load()
         found = False
         for entry in data["hooks"]["SessionStart"]:
             for hook in entry.get("hooks", []):
-                if "session-start.sh" in hook.get("command", ""):
+                if "emit-hot-memory.sh" in hook.get("command", ""):
                     found = True
-        assert found, "SessionStart must still wire session-start.sh in Phase 1"
+        assert found, (
+            "SessionStart must wire emit-hot-memory.sh after T11 — "
+            "the old session-start.sh hook was retired."
+        )
+
+    def test_session_start_no_longer_wires_session_start_sh(self):
+        """T11 deleted session-start.sh; hooks.json must not reference it."""
+        data = _load()
+        for entry in data["hooks"]["SessionStart"]:
+            for hook in entry.get("hooks", []):
+                cmd = hook.get("command", "")
+                assert "session-start.sh" not in cmd, (
+                    "SessionStart must not reference session-start.sh after T11; "
+                    f"found in command: {cmd!r}"
+                )
+
+    def test_session_start_matcher_unchanged(self):
+        """The matcher (`startup|clear|compact`) and timeout stay the same
+        across the T11 rewire — only the command changes."""
+        data = _load()
+        session_start = data["hooks"]["SessionStart"]
+        assert session_start, "SessionStart must have at least one entry"
+        entry = session_start[0]
+        assert entry.get("matcher") == "startup|clear|compact", (
+            f"SessionStart matcher must remain 'startup|clear|compact', "
+            f"got {entry.get('matcher')!r}"
+        )
 
     def test_session_end_still_wires_session_end_sh(self):
         data = _load()
@@ -171,18 +199,4 @@ class TestSessionHooksUntouched:
             for hook in entry.get("hooks", []):
                 if "session-end.sh" in hook.get("command", ""):
                     found = True
-        assert found, "SessionEnd must still wire session-end.sh in Phase 1"
-
-    def test_emit_hot_memory_sh_not_wired_yet(self):
-        """Phase 1 must not reference emit-hot-memory.sh — that's Phase 3's job."""
-        data = _load()
-        all_commands: list[str] = []
-        for entries in data["hooks"].values():
-            for entry in entries:
-                for hook in entry.get("hooks", []):
-                    all_commands.append(hook.get("command", ""))
-        for cmd in all_commands:
-            assert "emit-hot-memory.sh" not in cmd, (
-                f"Phase 1 must not wire emit-hot-memory.sh (that's Phase 3); "
-                f"found in command: {cmd!r}"
-            )
+        assert found, "SessionEnd must still wire session-end.sh"
