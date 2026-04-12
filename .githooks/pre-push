@@ -80,28 +80,32 @@ LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
 # Determine if we need to auto-remediate
 NEEDS_BUMP=false
 NEEDS_TAG=false
+TAG_VALID=false
 
-if [ -n "$LAST_TAG" ]; then
-    TAG_CLEAN="${LAST_TAG#v}"
-
-    # Case 1: version == last tag → no manual bump was done, auto-bump needed
-    if [ "$CURRENT_VERSION" = "$TAG_CLEAN" ]; then
-        NEEDS_BUMP=true
-    fi
-fi
-
-# Case 2: version has no matching tag → tag needed
-if ! git tag -l "$EXPECTED_TAG" | grep -q .; then
-    NEEDS_TAG=true
-fi
-
-# Case 3: tag exists but not reachable from HEAD → stale tag, re-tag needed
-if [ "$NEEDS_TAG" = "false" ]; then
+# First: check if the current version already has a valid tag reachable from HEAD.
+# If so, everything is in order — skip all remediation.
+if git tag -l "$EXPECTED_TAG" | grep -q .; then
     TAG_COMMIT=$(git rev-list -n 1 "$EXPECTED_TAG")
-    if ! git merge-base --is-ancestor "$TAG_COMMIT" HEAD 2>/dev/null; then
+    if git merge-base --is-ancestor "$TAG_COMMIT" HEAD 2>/dev/null; then
+        TAG_VALID=true
+    else
+        # Tag exists but not reachable from HEAD → stale, delete and re-tag
         bold "pre-push: tag $EXPECTED_TAG is stale (not reachable from HEAD), deleting"
         git tag -d "$EXPECTED_TAG" >/dev/null 2>&1
         NEEDS_TAG=true
+    fi
+else
+    # No tag for current version
+    NEEDS_TAG=true
+fi
+
+# If tag is valid, we're on a tagged release — nothing to do.
+# If tag is invalid/missing AND version == last tag, we need a bump.
+if [ "$TAG_VALID" = "false" ] && [ -n "$LAST_TAG" ]; then
+    TAG_CLEAN="${LAST_TAG#v}"
+    if [ "$CURRENT_VERSION" = "$TAG_CLEAN" ]; then
+        NEEDS_BUMP=true
+        NEEDS_TAG=false  # --release handles tagging
     fi
 fi
 
