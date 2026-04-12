@@ -190,36 +190,44 @@ class TestVersionConsistency:
             assert p.isdigit(), f"version component {p!r} is not numeric"
 
     def test_version_tag_relationship(self):
-        """Version must either match a reachable tag or be greater than the last tag.
+        """Version tag must point at HEAD, or version must be greater than last tag.
 
-        Once we tag every release, the normal state is: a tag v{version} exists
-        on HEAD (or an ancestor). If not, it means we're developing toward a new
-        version and it must be strictly greater than the last tag.
+        The pre-push hook auto-bumps whenever HEAD moves past a tag. So the
+        only valid states at push time are:
+          1. Tag v{version} exists and points directly at HEAD (we ARE the release)
+          2. No tag for current version, but version > last tag (pre-bump state
+             that the hook will fix before push completes)
+
+        "Tag is an ancestor of HEAD" is NOT valid — it means there's unreleased
+        code and the hook should have bumped. This test enforces the same
+        invariant as the hook.
         """
         pj = load_json(PLUGIN_JSON)
         current_str = pj["version"]
         current = parse_semver(current_str)
         expected_tag = f"v{current_str}"
 
-        # Check if a matching tag exists and is reachable from HEAD
         tag_exists = subprocess.run(
             ["git", "-C", str(REPO_ROOT), "tag", "-l", expected_tag],
             capture_output=True, text=True, check=True,
         ).stdout.strip()
+
         if tag_exists:
-            # Tag exists — verify it's reachable from HEAD
+            # Tag exists — it MUST point at HEAD, not just be an ancestor
             tag_commit = subprocess.run(
                 ["git", "-C", str(REPO_ROOT), "rev-list", "-n", "1", expected_tag],
                 capture_output=True, text=True, check=True,
             ).stdout.strip()
-            result = subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "merge-base", "--is-ancestor",
-                 tag_commit, "HEAD"],
+            head_commit = subprocess.run(
+                ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+                capture_output=True, text=True, check=True,
+            ).stdout.strip()
+            assert tag_commit == head_commit, (
+                f"tag {expected_tag} exists but points at {tag_commit[:8]}, not "
+                f"HEAD ({head_commit[:8]}). HEAD has moved past the release — "
+                f"the pre-push hook should auto-bump on next push."
             )
-            assert result.returncode == 0, (
-                f"tag {expected_tag} exists but is not reachable from HEAD"
-            )
-            return  # Tagged release — relationship is valid
+            return
 
         # No matching tag — version must be strictly greater than the last tag
         try:
@@ -239,7 +247,7 @@ class TestVersionConsistency:
         assert current > tag_version, (
             f"plugin.json version {current_str} has no matching tag and is not "
             f"strictly greater than last tag {last_tag} — "
-            f"run: python3 secondbrain/scripts/bump_version.py --release"
+            f"the pre-push hook should auto-bump on next push."
         )
 
 
