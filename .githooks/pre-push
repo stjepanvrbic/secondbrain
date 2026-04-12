@@ -77,56 +77,39 @@ CURRENT_VERSION=$(python3 -c 'import json,sys; print(json.load(open("'"$PLUGIN_R
 EXPECTED_TAG="v$CURRENT_VERSION"
 LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
 
-# Determine if we need to auto-remediate
-NEEDS_BUMP=false
-NEEDS_TAG=false
-TAG_VALID=false
+# Determine if HEAD is a tagged release or has new code past the tag.
+#
+# The ONLY state where no action is needed: the tag for the current version
+# exists AND points directly at HEAD (HEAD IS the tagged commit). Any other
+# state means we need to auto-bump.
+#
+# Specifically:
+#   - Tag exists, points at HEAD         → we're ON the release. Pass.
+#   - Tag exists, is ancestor of HEAD    → new code after release. BUMP.
+#   - Tag exists, not reachable from HEAD → stale/diverged. BUMP.
+#   - No tag for current version         → BUMP.
 
-# First: check if the current version already has a valid tag reachable from HEAD.
-# If so, everything is in order — skip all remediation.
+NEEDS_BUMP=true  # default: assume we need to bump
+
 if git tag -l "$EXPECTED_TAG" | grep -q .; then
     TAG_COMMIT=$(git rev-list -n 1 "$EXPECTED_TAG")
-    if git merge-base --is-ancestor "$TAG_COMMIT" HEAD 2>/dev/null; then
-        TAG_VALID=true
-    else
-        # Tag exists but not reachable from HEAD → stale, delete and re-tag
-        bold "pre-push: tag $EXPECTED_TAG is stale (not reachable from HEAD), deleting"
-        git tag -d "$EXPECTED_TAG" >/dev/null 2>&1
-        NEEDS_TAG=true
-    fi
-else
-    # No tag for current version
-    NEEDS_TAG=true
-fi
-
-# If tag is valid, we're on a tagged release — nothing to do.
-# If tag is invalid/missing AND version == last tag, we need a bump.
-if [ "$TAG_VALID" = "false" ] && [ -n "$LAST_TAG" ]; then
-    TAG_CLEAN="${LAST_TAG#v}"
-    if [ "$CURRENT_VERSION" = "$TAG_CLEAN" ]; then
-        NEEDS_BUMP=true
-        NEEDS_TAG=false  # --release handles tagging
+    HEAD_COMMIT=$(git rev-parse HEAD)
+    if [ "$TAG_COMMIT" = "$HEAD_COMMIT" ]; then
+        # HEAD IS the tagged commit — this is the release. No action needed.
+        NEEDS_BUMP=false
     fi
 fi
 
-# Auto-remediate: bump + tag, or just tag
 if [ "$NEEDS_BUMP" = "true" ]; then
-    bold "pre-push: auto-bumping patch version (current $CURRENT_VERSION == last tag $LAST_TAG)"
+    bold "pre-push: auto-bumping (HEAD has commits past last release)"
     python3 "$BUMP_SCRIPT" --release
     NEW_VERSION=$(python3 -c 'import json,sys; print(json.load(open("'"$PLUGIN_ROOT"'/.claude-plugin/plugin.json"))["version"])')
     bold ""
-    bold "pre-push: auto-bumped $CURRENT_VERSION -> $NEW_VERSION and tagged v$NEW_VERSION"
+    bold "pre-push: auto-bumped to v$NEW_VERSION and tagged"
     bold "pre-push: run 'git push' again to include the version bump"
     exit 1
-elif [ "$NEEDS_TAG" = "true" ]; then
-    bold "pre-push: auto-creating tag $EXPECTED_TAG for current version"
-    python3 "$BUMP_SCRIPT" --tag
-    bold ""
-    bold "pre-push: created tag $EXPECTED_TAG"
-    bold "pre-push: run 'git push' again to include the tag"
-    exit 1
 else
-    green "pre-push: version $CURRENT_VERSION has matching tag $EXPECTED_TAG"
+    green "pre-push: HEAD is tagged release $EXPECTED_TAG"
 fi
 
 # -------------------------------------------------------------------------
