@@ -4,7 +4,7 @@ Enforce-not-document. Every failure in this file is a bug the user would hit
 during install or update. Runs against the live repo state, not fixtures.
 
 Checks:
-    - plugin.json / marketplace.json version consistency
+    - marketplace.json owns plugin versioning for the relative-path plugin
     - marketplace.json source path resolves to a real plugin dir
     - hooks/hooks.json schema and every command resolves to an executable file
     - Every command uses ${CLAUDE_PLUGIN_ROOT} (no hardcoded paths)
@@ -43,6 +43,9 @@ HOOKS_DIR = PLUGIN_ROOT / "hooks"
 CLI_ENTRYPOINT_ALLOWLIST = {
     "bump_version.py",         # dev-only: used by pre-push hook and CI
     "install_git_hooks.py",    # dev-only: documented in repo-root CONTRIBUTING.md
+    "lifecycle_ingest.py",     # hook orchestration helper used by shell wrappers
+    "run_ingester_job.py",     # detached ingester runner used by lifecycle_ingest.py
+    "release_workflow.py",     # pure release-state planner used by pre-push
     "setup_steps.py",          # library-only: imported by init + doctor (wired up in T3/T6)
     "connect_mcp_client.py",   # library-only: imported by dream/hot-memory/doctor (wired up in T10/T11/T13/T14)
     "doctor_checks.py",        # library-only: imported by doctor_cli (T5)
@@ -143,16 +146,11 @@ def parse_semver(v: str) -> tuple[int, int, int]:
 # ----------------------------------------------------------------------
 
 class TestVersionConsistency:
-    def test_plugin_json_version_matches_marketplace(self):
+    def test_plugin_json_does_not_define_version_for_relative_path_plugin(self):
         pj = load_json(PLUGIN_JSON)
-        mj = load_json(MARKETPLACE_JSON)
-        plugins = mj.get("plugins", [])
-        assert plugins, "marketplace.json has no plugins entry"
-        assert len(plugins) == 1, "expected exactly one plugin in marketplace.json"
-        assert pj["version"] == plugins[0]["version"], (
-            f"plugin.json version {pj['version']!r} != "
-            f"marketplace.json plugin version {plugins[0]['version']!r} — "
-            f"run scripts/bump_version.py to fix"
+        assert "version" not in pj, (
+            "relative-path plugins should not duplicate version in plugin.json; "
+            "marketplace.json is the source of truth for update detection"
         )
 
     def test_marketplace_metadata_version_matches_plugin_version(self):
@@ -183,9 +181,10 @@ class TestVersionConsistency:
         )
 
     def test_version_is_valid_semver(self):
-        pj = load_json(PLUGIN_JSON)
-        parts = pj["version"].split(".")
-        assert len(parts) == 3, f"version {pj['version']!r} is not X.Y.Z"
+        mj = load_json(MARKETPLACE_JSON)
+        plugin_version = mj["plugins"][0]["version"]
+        parts = plugin_version.split(".")
+        assert len(parts) == 3, f"version {plugin_version!r} is not X.Y.Z"
         for p in parts:
             assert p.isdigit(), f"version component {p!r} is not numeric"
 
@@ -202,8 +201,8 @@ class TestVersionConsistency:
         code and the hook should have bumped. This test enforces the same
         invariant as the hook.
         """
-        pj = load_json(PLUGIN_JSON)
-        current_str = pj["version"]
+        mj = load_json(MARKETPLACE_JSON)
+        current_str = mj["plugins"][0]["version"]
         current = parse_semver(current_str)
         expected_tag = f"v{current_str}"
 
@@ -279,7 +278,7 @@ class TestMarketplaceSchema:
 class TestPluginSchema:
     def test_plugin_json_required_fields(self):
         data = load_json(PLUGIN_JSON)
-        for field in ("name", "version", "description"):
+        for field in ("name", "description"):
             assert field in data, f"plugin.json missing required field: {field}"
 
     def test_plugin_json_name_matches_marketplace_entry(self):

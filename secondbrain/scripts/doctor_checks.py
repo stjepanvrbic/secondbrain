@@ -47,10 +47,13 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlparse
 
 # Ensure sibling modules (setup_steps, connect_mcp_client) are importable.
 # When installed as a plugin, scripts/ is the cwd for hook invocations; when
@@ -1010,62 +1013,115 @@ def check_vaults_config() -> CheckResult:
     )
 
 
-def check_plugin_version_mismatch(plugin_root: Path) -> CheckResult:
-    """Compare installed plugin version against the source marketplace version.
+def _parse_repo_slug(repository_url: str) -> Optional[str]:
+    parsed = urlparse(repository_url)
+    path = parsed.path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    if path.count("/") != 1:
+        return None
+    return path
 
-    Detects when Cowork's marketplace sync updated metadata but did not
-    re-extract plugin files to rpm/.
+
+def _fetch_latest_release_tag(repo_slug: str) -> str:
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{repo_slug}/releases/latest",
+        headers={"Accept": "application/vnd.github+json"},
+    )
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    tag_name = data.get("tag_name")
+    if not isinstance(tag_name, str) or not tag_name:
+        raise ValueError("latest release payload missing tag_name")
+    return tag_name
+
+
+def check_plugin_version_mismatch(
+    plugin_root: Path,
+    latest_release_fetcher: Optional[Callable[[str], str]] = None,
+) -> CheckResult:
+    """Compare installed marketplace version against the latest published release.
+
+    The runtime plugin is a relative-path marketplace entry, so the version
+    source of truth lives in `<repo>/.claude-plugin/marketplace.json`, not in
+    `plugin.json`. The doctor check compares that installed marketplace version
+    with the latest GitHub release tag and cleanly skips offline.
     """
-    installed_pj = plugin_root / ".claude-plugin" / "plugin.json"
-    if not installed_pj.is_file():
+    plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
+    if not plugin_json.is_file():
         return CheckResult(
             name="plugin_version_mismatch",
             status="skip",
             message="cannot find installed plugin.json",
             fixable=False,
         )
+
     try:
-        installed_version = json.loads(installed_pj.read_text())["version"]
+        plugin_data = json.loads(plugin_json.read_text())
     except Exception:
         return CheckResult(
             name="plugin_version_mismatch",
             status="skip",
-            message="cannot read installed plugin.json version",
+            message="cannot read installed plugin metadata",
             fixable=False,
         )
 
-    # Find the source marketplace version via the scripts directory
-    source_pj = _SCRIPTS_DIR.parent / ".claude-plugin" / "plugin.json"
-    if not source_pj.is_file():
+    repo_root = plugin_root.parent
+    installed_marketplace = repo_root / ".claude-plugin" / "marketplace.json"
+    if not installed_marketplace.is_file():
         return CheckResult(
             name="plugin_version_mismatch",
             status="skip",
-            message="cannot find source plugin.json for comparison",
+            message="cannot find installed marketplace.json",
             fixable=False,
         )
+
     try:
-        source_version = json.loads(source_pj.read_text())["version"]
+        installed_data = json.loads(installed_marketplace.read_text())
+        installed_version = installed_data["plugins"][0]["version"]
     except Exception:
         return CheckResult(
             name="plugin_version_mismatch",
             status="skip",
-            message="cannot read source plugin.json version",
+            message="cannot read installed marketplace version",
             fixable=False,
         )
 
-    if installed_version == source_version:
+    repo_slug = _parse_repo_slug(str(plugin_data.get("repository") or ""))
+    if not repo_slug:
+        return CheckResult(
+            name="plugin_version_mismatch",
+            status="skip",
+            message="cannot determine repository slug for latest-release check",
+            fixable=False,
+        )
+
+    fetcher = latest_release_fetcher or _fetch_latest_release_tag
+    try:
+        latest_tag = fetcher(repo_slug)
+    except Exception as exc:
+        return CheckResult(
+            name="plugin_version_mismatch",
+            status="skip",
+            message=f"latest release check unavailable: {exc}",
+            fixable=False,
+        )
+
+    latest_version = latest_tag.lstrip("v")
+    if installed_version == latest_version:
         return CheckResult(
             name="plugin_version_mismatch",
             status="pass",
-            message=f"plugin version {installed_version} matches source",
+            message=f"installed marketplace version {installed_version} matches latest release",
             fixable=False,
         )
+
     return CheckResult(
         name="plugin_version_mismatch",
         status="warning",
         message=(
-            f"installed plugin v{installed_version} but source is v{source_version}. "
-            f"In Cowork, try removing and reinstalling the plugin from the marketplace."
+            f"installed marketplace version {installed_version} but latest release is "
+            f"{latest_version}. In Cowork, remove and reinstall the plugin from the marketplace."
         ),
         fixable=False,
     )

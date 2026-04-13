@@ -38,6 +38,7 @@ from doctor_checks import (  # pyright: ignore[reportMissingImports]
     check_obsidian_api_key,
     check_obsidian_mcp_port,
     check_obsidian_running,
+    check_plugin_version_mismatch,
     check_plugin_root,
     check_profile_has_user_content,
     check_scheduled_tasks,
@@ -381,6 +382,70 @@ class TestCheckStandardFolders:
         assert r.status == "fail"
         assert r.fixable is True
         assert r.fix_function == "setup_vault_scaffolding"
+
+
+# ---------------------------------------------------------------------------
+# check_plugin_version_mismatch — Check 20
+# ---------------------------------------------------------------------------
+
+class TestCheckPluginVersionMismatch:
+    def _write_installed_plugin(self, plugin_root: Path, version: str) -> None:
+        (plugin_root / ".claude-plugin").mkdir(parents=True, exist_ok=True)
+        (plugin_root / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "secondbrain",
+                    "description": "x",
+                    "repository": "https://github.com/stjepanvrbic/secondbrain",
+                }
+            )
+        )
+        repo_root = plugin_root.parent
+        (repo_root / ".claude-plugin").mkdir(parents=True, exist_ok=True)
+        (repo_root / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps(
+                {
+                    "metadata": {"version": version},
+                    "plugins": [{"name": "secondbrain", "version": version, "source": "./secondbrain"}],
+                }
+            )
+        )
+
+    def test_warning_when_latest_release_is_newer(self, tmp_path: Path):
+        plugin_root = tmp_path / "secondbrain"
+        plugin_root.mkdir()
+        self._write_installed_plugin(plugin_root, "3.5.11")
+        r = check_plugin_version_mismatch(
+            plugin_root,
+            latest_release_fetcher=lambda _repo: "v3.5.12",
+        )
+        assert r.status == "warning"
+        assert "3.5.12" in r.message
+        assert "reinstall" in r.message.lower()
+
+    def test_pass_when_installed_matches_latest_release(self, tmp_path: Path):
+        plugin_root = tmp_path / "secondbrain"
+        plugin_root.mkdir()
+        self._write_installed_plugin(plugin_root, "3.5.12")
+        r = check_plugin_version_mismatch(
+            plugin_root,
+            latest_release_fetcher=lambda _repo: "v3.5.12",
+        )
+        assert r.status == "pass"
+
+    def test_skip_when_latest_release_cannot_be_fetched(self, tmp_path: Path):
+        plugin_root = tmp_path / "secondbrain"
+        plugin_root.mkdir()
+        self._write_installed_plugin(plugin_root, "3.5.12")
+
+        def _boom(_repo: str) -> str:
+            raise OSError("offline")
+
+        r = check_plugin_version_mismatch(
+            plugin_root,
+            latest_release_fetcher=_boom,
+        )
+        assert r.status == "skip"
 
     def test_fail_listing_missing_names(self, tmp_path: Path):
         vault = tmp_path / "partial"

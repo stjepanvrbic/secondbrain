@@ -37,7 +37,7 @@ Then follow the prompts. The init skill automates nearly everything:
 - Reads the API key and port from plugin config
 - Writes environment variables to your shell config (zsh/bash/fish/PowerShell)
 - Scaffolds your vault with starter files
-- Installs 6 scheduled tasks
+- Installs the bundled scheduled tasks from `secondbrain/scheduled-tasks/MANIFEST.md`
 - Asks 2-3 profile questions (name, work, communication style)
 - Runs verification to confirm everything works
 
@@ -77,7 +77,7 @@ Init is mostly automated via `scripts/init_obsidian.py`. You don't need to know 
 6. **Configure MCP connection** — reads API key and port from plugin config, writes env vars to your shell config
 7. **Verify** — runs `verify_vault.py` and `rebuild_manifest.py` to confirm everything is valid
 
-After the automated setup, the init skill asks 2-3 profile questions (name, work, communication style) and installs 6 scheduled tasks.
+After the automated setup, the init skill asks 2-3 profile questions (name, work, communication style) and installs the bundled scheduled tasks from `secondbrain/scheduled-tasks/MANIFEST.md`.
 
 **Idempotent:** running `/secondbrain:init` twice is safe. Re-runs detect what's already done and only complete missing pieces.
 
@@ -101,10 +101,11 @@ The hooks fire automatically: the `SessionStart` hook injects pre-computed hot m
 
 ## Bundled scheduled tasks
 
-`init` installs 6 scheduled tasks by default. You can opt out of any during setup, and customize the times:
+`init` installs the bundled scheduled tasks from `secondbrain/scheduled-tasks/MANIFEST.md` by default. You can opt out of any during setup, and customize the times:
 
 | Task | Default time | Skill | What it does |
 |---|---|---|---|
+| morning-brief | 8:00am daily | `secondbrain-morning-brief` | Pre-brief subagent warmup before the main morning planning pass |
 | morning-briefing | 10:30am daily | `morning-brief` | Loads context, processes overnight inbox, builds today's energy-matched plan |
 | deadline-tracker | 1:00pm daily | `deadline-check` | Lightweight midday scan, auto-promotes urgent items |
 | email-triage | 9:00am weekdays | `email-triage` | Reads every unread email, extracts action items (requires Gmail MCP) |
@@ -140,7 +141,7 @@ v3 introduces a **script-first architecture**: deterministic tasks are handled b
 
 **Hook enforcement:** A `PreToolUse` hook (`hooks/enforce-mcp-only.sh`) blocks `Edit`/`Write`/`NotebookEdit` on vault paths and restricts `Bash` writes to a sanctioned-script allowlist. A `PostToolUse` hook (`hooks/validate-after-write.sh`) runs `verify_vault.py` after every vault write (MCP or sanctioned-script). If integrity checks fail, the agent is blocked until it fixes the issues.
 
-**Testing:** 1128 tests across the `tests/` suite (pytest, zero external dependencies). All scripts tested on macOS, Windows, and Linux.
+**Testing:** 1178 tests across the `tests/` suite (pytest, zero external dependencies). All scripts tested on macOS, Windows, and Linux.
 
 ---
 

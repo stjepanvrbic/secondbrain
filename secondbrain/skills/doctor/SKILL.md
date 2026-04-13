@@ -69,8 +69,8 @@ question, and then **STOP**.
      is a config conflict, not a fix target. Tell the user to reconcile
      VAULT_PATH vs the open Obsidian vault.
    - **Scheduled tasks (Check 12):** call `CronList` (Code) or inspect
-     `<workspace>/.scheduled-tasks/` (Cowork) and verify the 6 bundled
-     tasks are registered. Report count.
+     `<workspace>/.scheduled-tasks/` (Cowork) and verify the bundled
+     tasks from `scheduled-tasks/MANIFEST.md` are registered. Report count.
 3. Print the full report combining both sources. Summarize as:
 
    ```
@@ -84,8 +84,10 @@ question, and then **STOP**.
    ```
 
    If nothing is auto-fixable, end with a list of manual actions for each
-   failure. In both cases, **STOP**. Do NOT proceed to Phase 2 on the same
-   turn.
+   failure. If `vault_verification` failed or warned, explicitly say that
+   `/secondbrain:dream-protocol` is the repair path for those vault issues
+   and offer it as the next manual step. In both cases, **STOP**. Do NOT
+   proceed to Phase 2 on the same turn.
 
 ## Checks doctor runs in Phase 1
 

@@ -640,6 +640,7 @@ Read `@${CLAUDE_PLUGIN_ROOT}/scheduled-tasks/MANIFEST.md` for the bundled tasks.
 ```
 I'll set up these scheduled tasks (you can opt out of any):
 
+  ☑ morning-brief         8:00am daily        Morning warmup subagent
   ☑ morning-briefing      10:30am daily       Morning context + day plan
   ☑ deadline-tracker       1:00pm daily        Auto-promote urgent items
   ☑ email-triage           9:00am weekdays     Read inbox, extract action items (requires Gmail MCP)
@@ -658,7 +659,7 @@ For each task:
 1. Copy `${CLAUDE_PLUGIN_ROOT}/scheduled-tasks/<task-name>/SKILL.md` to `~/Documents/Claude/Scheduled/<task-name>/SKILL.md` (creating parent dirs if needed)
 2. Call `CronCreate` with:
    - `cron`: the cron string from MANIFEST.md (e.g., `30 10 * * *`)
-   - `prompt`: `Run /secondbrain:<skill-name>` (e.g., `Run /secondbrain:morning-brief`)
+   - `prompt`: `Run <skill from MANIFEST.md>` (e.g., `Run secondbrain-morning-brief` or `Run /secondbrain:morning-brief`)
    - `recurring`: `true`
    - `durable`: `true` (so the task persists across restarts)
 3. Verify the task registered by calling `CronList` and checking it appears
@@ -671,13 +672,14 @@ After all tasks: print `✓ Installed N scheduled tasks via CronCreate.`
 `CronCreate` is not available in Cowork. Instead:
 
 1. Copy each task's SKILL.md to `<workspace>/.scheduled-tasks/<task-name>/SKILL.md` so Cowork can discover them
-2. Print copy-pasteable `/schedule` commands for the user to run in the Cowork chat:
+2. Print one copy-pasteable `/schedule` command for EACH opted-in row from `scheduled-tasks/MANIFEST.md`, preserving the manifest's operation target (`Run <skill>`). For the current default manifest the commands are:
 
 ```
 Cowork doesn't let plugins create scheduled tasks directly. To enable
 these tasks, copy each line below and paste it into the Cowork chat
 (one at a time):
 
+  /schedule "morning brief"    daily 08:00  Run secondbrain-morning-brief
   /schedule "morning briefing" daily 10:30  Run /secondbrain:morning-brief
   /schedule "deadline tracker" daily 13:00  Run /secondbrain:deadline-check
   /schedule "email triage"     weekdays 09:00  Run /secondbrain:email-triage
@@ -690,17 +692,17 @@ examples. Check the /schedule skill in Cowork for the current format
 if any of these don't work — the operation/skill mapping is what
 matters, the syntax around it is just how you tell Cowork.
 
-After running these in Cowork, all 6 scheduled tasks will be active.
+After running these in Cowork, the listed scheduled tasks will be active.
 They run when Claude Desktop is open and your computer is awake.
 ```
 
 3. **Confirm registration before proceeding.** Cowork is out-of-band — the skill has no way to query whether the `/schedule` commands were actually accepted. Block here until the user acknowledges:
 
 ```
-Confirm: did you paste all 6 commands into Cowork chat and see them accepted? [y/n]
+Confirm: did you paste all of the listed commands into Cowork chat and see them accepted? [y/n]
 ```
 
-If the user answers `y`, continue. If `n` (or anything else), re-print the 6 commands and ask again. Do not advance to Step 6 until the user confirms `y`. If the user says they want to skip scheduled tasks entirely after seeing them, treat it as the 5a "skip" path and print the same "managed elsewhere" message.
+If the user answers `y`, continue. If `n` (or anything else), re-print the listed commands and ask again. Do not advance to Step 6 until the user confirms `y`. If the user says they want to skip scheduled tasks entirely after seeing them, treat it as the 5a "skip" path and print the same "managed elsewhere" message.
 
 Print: `✓ Bundled N scheduled task templates. Run the /schedule commands above to activate them.`
 
@@ -937,7 +939,7 @@ secondbrain verification report:
   ✓ log.md exists (latest entry: 2026-04-09 02:00 dream-protocol)
   ✓ me/profile.md exists and has user content
   ✓ All standard folders present
-  ✓ 6 scheduled tasks registered
+  ✓ Bundled scheduled tasks registered
   ✓ Last dream-protocol run: 2026-04-09 02:00 (clean)
 
   All checks passed (12/12).

@@ -1,0 +1,55 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish-release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate semver tag
+        run: |
+          if ! [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Non-semver tag: ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+
+      - name: Create or update latest release
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "$tag" --latest
+          else
+            gh release create "$tag" --verify-tag --generate-notes --title "$tag" --latest
+          fi
+
+      - name: Delete older semver releases
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release list --limit 100 --json tagName --jq '.[].tagName' | while read -r old; do
+            if [[ -n "$old" && "$old" != "$tag" && "$old" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              gh release delete "$old" -y >/dev/null 2>&1 || true
+            fi
+          done
+
+      - name: Delete older semver tags
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          git fetch --tags --force
+          git tag -l 'v*' | while read -r old; do
+            if [[ -n "$old" && "$old" != "$tag" && "$old" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              git push origin ":refs/tags/$old" >/dev/null 2>&1 || true
+            fi
+          done

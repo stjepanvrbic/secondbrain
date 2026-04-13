@@ -43,12 +43,12 @@ class TestCheckConsistency:
 
     def test_counts_all_files(self):
         versions = get_all_versions()
-        # plugin.json + marketplace.json + 14 skills = 16
-        assert len(versions) >= 16
+        # marketplace metadata + marketplace plugin version + 13 skills = 15
+        assert len(versions) >= 15
 
 
 class TestReadCurrentVersion:
-    def test_reads_from_plugin_json(self):
+    def test_reads_from_marketplace_json(self):
         v = read_current_version()
         assert v.count(".") == 2
         parsed = parse_version(v)
@@ -62,7 +62,7 @@ class TestSetVersion:
         plugin_dir = tmp_path / ".claude-plugin"
         plugin_dir.mkdir()
         (plugin_dir / "plugin.json").write_text(json.dumps({
-            "name": "test", "version": "1.0.0"
+            "name": "test"
         }))
         (plugin_dir / "marketplace.json").write_text(json.dumps({
             "name": "test",
@@ -99,11 +99,11 @@ class TestSetVersion:
             bump_version.SKILLS_DIR = tmp_path / "skills"
 
             changed = set_version("2.0.0")
-            assert changed >= 3  # plugin.json + marketplace + 2 skills
+            assert changed >= 3  # marketplace + 2 skills
 
             # Verify plugin.json
             data = json.loads((plugin_dir / "plugin.json").read_text())
-            assert data["version"] == "2.0.0"
+            assert "version" not in data
 
             # Verify marketplace.json
             data = json.loads((plugin_dir / "marketplace.json").read_text())
@@ -123,7 +123,7 @@ class TestSetVersion:
         plugin_dir = tmp_path / ".claude-plugin"
         plugin_dir.mkdir()
         (plugin_dir / "plugin.json").write_text(json.dumps({
-            "name": "test", "version": "2.0.0"
+            "name": "test"
         }))
         (plugin_dir / "marketplace.json").write_text(json.dumps({
             "name": "test",
@@ -162,7 +162,7 @@ class TestMain:
         plugin_dir = tmp_path / ".claude-plugin"
         plugin_dir.mkdir()
         (plugin_dir / "plugin.json").write_text(json.dumps({
-            "name": "test", "version": "1.0.0"
+            "name": "test"
         }))
         (plugin_dir / "marketplace.json").write_text(json.dumps({
             "name": "test",
@@ -188,7 +188,9 @@ class TestMain:
             code = main(["5.0.0"])
             assert code == 0
             data = json.loads((plugin_dir / "plugin.json").read_text())
-            assert data["version"] == "5.0.0"
+            assert "version" not in data
+            marketplace = json.loads((plugin_dir / "marketplace.json").read_text())
+            assert marketplace["plugins"][0]["version"] == "5.0.0"
         finally:
             bump_version.REPO_ROOT = orig_root
             bump_version.VERSION_FILES = orig_files
@@ -258,7 +260,7 @@ class TestRelease:
     """Tests for the release() function — full pipeline: bump + commit + tag."""
 
     def test_release_bumps_commits_and_tags(self):
-        """release() must call set_version, git add, git commit, and create_tag."""
+        """release() must call set_version, stage only release files, commit, and tag."""
         calls: list[tuple[str, ...]] = []
 
         def fake_git(*args):
@@ -277,11 +279,14 @@ class TestRelease:
         assert rc == 0
         mock_set.assert_called_once_with("2.0.0")
         mock_tag.assert_called_once_with("2.0.0")
-        # Verify git add -u and git commit were called
+        # Verify git add and git commit were called
         add_calls = [c for c in calls if c[0] == "add"]
         commit_calls = [c for c in calls if c[0] == "commit"]
         assert len(add_calls) == 1
         assert len(commit_calls) == 1
+        assert "-u" not in add_calls[0], (
+            "release() must not use `git add -u`; that can capture unrelated tracked changes"
+        )
         assert "Bump to 2.0.0" in commit_calls[0][-1]
 
     def test_release_auto_bumps_patch(self):

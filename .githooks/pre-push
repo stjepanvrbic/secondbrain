@@ -1,36 +1,13 @@
 #!/usr/bin/env bash
 #
-# pre-push: refuse to push unless the plugin is in a perfectly healthy state.
-#
-# This hook is TRACKED in the repo (.githooks/pre-push) and activated by running
-# `python3 secondbrain/scripts/install_git_hooks.py` which sets
-# `core.hooksPath = .githooks`. If you see this hook not running, core.hooksPath
-# is probably not set for your clone.
-#
-# What this hook enforces:
-#   1. version drift        — plugin.json / marketplace.json metadata.version / plugins[].version / SKILL.md all in lockstep
-#   2. auto version bump    — if version == last tag (no manual bump), auto-bump patch + commit + tag
-#   3. auto tag creation    — if version > last tag but no tag, auto-create tag
-#   4. manifest health      — test_plugin_manifest.py must pass
-#   5. full test suite      — all tests must pass
-#
-# AUTO-REMEDIATION: Gates 2-3 auto-fix missing bumps/tags by running
-# bump_version.py --release, then abort so `git push` can be re-run with
-# the new commit + tag included. This means `git push` is the ONLY command
-# the developer needs. If it aborts, just run `git push` again.
-#
-# What this hook must NOT do:
-#   - NEVER `git commit --amend` during push. The old hook did that, which caused
-#     a non-fast-forward push, which caused a force-push, which wedged every
-#     shallow marketplace clone downstream.
-#   - NEVER pass `--no-verify` in any nested git call.
-#   - NEVER skip tests under time pressure.
+# pre-push: refuse to push unless the plugin is release-ready.
 
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 PLUGIN_ROOT="$REPO_ROOT/secondbrain"
 BUMP_SCRIPT="$PLUGIN_ROOT/scripts/bump_version.py"
+RELEASE_WORKFLOW="$PLUGIN_ROOT/scripts/release_workflow.py"
 TESTS_DIR="$REPO_ROOT/tests"
 
 red()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
@@ -48,110 +25,110 @@ fail() {
     exit 1
 }
 
+is_semver_tag() {
+    [[ "${1:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+latest_local_semver_tag() {
+    git tag -l 'v*' --sort=-v:refname | while read -r tag; do
+        if is_semver_tag "$tag"; then
+            printf '%s\n' "$tag"
+            break
+        fi
+    done
+}
+
+prune_local_semver_tags() {
+    local keep_tag="$1"
+    local old
+    while read -r old; do
+        if [ -n "$old" ] && is_semver_tag "$old" && [ "$old" != "$keep_tag" ]; then
+            git tag -d "$old" >/dev/null 2>&1 || true
+        fi
+    done < <(git tag -l 'v*')
+}
+
+command -v python3 >/dev/null 2>&1 || fail "python3 not on PATH"
+PYTEST_BIN="$(command -v pytest || true)"
+[ -n "$PYTEST_BIN" ] || fail "pytest not on PATH" \
+    "Activate the project environment that provides pytest and retry."
+
 bold "pre-push: full health check starting"
 
-# -------------------------------------------------------------------------
-# 0. Sanity: must have python3 and pytest
-# -------------------------------------------------------------------------
-command -v python3 >/dev/null 2>&1 || fail "python3 not on PATH"
-python3 -c "import pytest" 2>/dev/null || fail "pytest not installed" \
-    "Install with: pip install pytest pytest-mock"
-
-# -------------------------------------------------------------------------
-# 1. Version consistency across all files
-# -------------------------------------------------------------------------
-bold "pre-push: [1/5] version consistency check"
+bold "pre-push: [1/4] version consistency check"
 if ! python3 "$BUMP_SCRIPT" --check; then
     fail "version files are inconsistent" \
         "Fix with:" \
         "    python3 secondbrain/scripts/bump_version.py <new-version>" \
-        "    git add -u && git commit --amend --no-edit" \
-        "    git push"
+        "    git add .claude-plugin/marketplace.json secondbrain/skills/*/SKILL.md" \
+        "    git commit"
 fi
 
-# -------------------------------------------------------------------------
-# 2-3. Auto-bump and auto-tag: ensure a tagged release exists
-# -------------------------------------------------------------------------
-bold "pre-push: [2/5] version & tag check"
-CURRENT_VERSION=$(python3 -c 'import json,sys; print(json.load(open("'"$PLUGIN_ROOT"'/.claude-plugin/plugin.json"))["version"])')
+bold "pre-push: [2/4] release state check"
+CURRENT_VERSION="$(python3 "$BUMP_SCRIPT" --current)"
 EXPECTED_TAG="v$CURRENT_VERSION"
-LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+LATEST_RELEASE_TAG="$(latest_local_semver_tag || true)"
 
-# Determine if HEAD is a tagged release or has new code past the tag.
-#
-# The ONLY state where no action is needed: the tag for the current version
-# exists AND points directly at HEAD (HEAD IS the tagged commit). Any other
-# state means we need to auto-bump.
-#
-# Specifically:
-#   - Tag exists, points at HEAD         → we're ON the release. Pass.
-#   - Tag exists, is ancestor of HEAD    → new code after release. BUMP.
-#   - Tag exists, not reachable from HEAD → stale/diverged. BUMP.
-#   - No tag for current version         → BUMP.
-
-NEEDS_BUMP=true  # default: assume we need to bump
-
+EXPECTED_TAG_EXISTS=0
+EXPECTED_TAG_POINTS_AT_HEAD=0
 if git tag -l "$EXPECTED_TAG" | grep -q .; then
-    TAG_COMMIT=$(git rev-list -n 1 "$EXPECTED_TAG")
-    HEAD_COMMIT=$(git rev-parse HEAD)
-    if [ "$TAG_COMMIT" = "$HEAD_COMMIT" ]; then
-        # HEAD IS the tagged commit — this is the release. No action needed.
-        NEEDS_BUMP=false
+    EXPECTED_TAG_EXISTS=1
+    if [ "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "$EXPECTED_TAG")" ]; then
+        EXPECTED_TAG_POINTS_AT_HEAD=1
     fi
 fi
 
-if [ "$NEEDS_BUMP" = "true" ]; then
-    bold "pre-push: auto-bumping (HEAD has commits past last release)"
-    python3 "$BUMP_SCRIPT" --release
-    NEW_VERSION=$(python3 -c 'import json,sys; print(json.load(open("'"$PLUGIN_ROOT"'/.claude-plugin/plugin.json"))["version"])')
+PLAN_JSON="$(python3 "$RELEASE_WORKFLOW" \
+    --current-version "$CURRENT_VERSION" \
+    --latest-release-tag "${LATEST_RELEASE_TAG:-}" \
+    --expected-tag-exists "$EXPECTED_TAG_EXISTS" \
+    --expected-tag-points-at-head "$EXPECTED_TAG_POINTS_AT_HEAD")"
 
-    # Delete ALL local tags except the one just created. push.followTags
-    # pushes every annotated tag pointing to a pushed commit — intermediate
-    # tags from previous auto-bump attempts would cause Cowork to step
-    # through versions instead of jumping to latest.
-    NEW_TAG="v$NEW_VERSION"
-    for OLD in $(git tag -l); do
-        if [ "$OLD" != "$NEW_TAG" ]; then
-            git tag -d "$OLD" >/dev/null 2>&1 || true
-        fi
-    done
+PLAN_ACTION="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["action"])' "$PLAN_JSON")"
+PLAN_REASON="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["reason"])' "$PLAN_JSON")"
 
-    bold ""
-    bold "pre-push: auto-bumped to v$NEW_VERSION and tagged"
-    bold "pre-push: run 'git push' again to include the version bump"
-    exit 1
-else
-    green "pre-push: HEAD is tagged release $EXPECTED_TAG"
-fi
+case "$PLAN_ACTION" in
+    noop)
+        green "pre-push: $PLAN_REASON"
+        ;;
+    tag_only)
+        bold "pre-push: creating missing release tag ($PLAN_REASON)"
+        python3 "$BUMP_SCRIPT" --tag
+        CURRENT_VERSION="$(python3 "$BUMP_SCRIPT" --current)"
+        prune_local_semver_tags "v$CURRENT_VERSION"
+        bold ""
+        bold "pre-push: created v$CURRENT_VERSION"
+        bold "pre-push: run 'git push' again to include the tag"
+        exit 1
+        ;;
+    bump_and_release)
+        bold "pre-push: auto-bumping release ($PLAN_REASON)"
+        python3 "$BUMP_SCRIPT" --release
+        CURRENT_VERSION="$(python3 "$BUMP_SCRIPT" --current)"
+        prune_local_semver_tags "v$CURRENT_VERSION"
+        bold ""
+        bold "pre-push: bumped and tagged v$CURRENT_VERSION"
+        bold "pre-push: run 'git push' again to include the release commit + tag"
+        exit 1
+        ;;
+    block)
+        fail "release state is ambiguous" "$PLAN_REASON"
+        ;;
+    *)
+        fail "unknown release plan action: $PLAN_ACTION"
+        ;;
+esac
 
-# -------------------------------------------------------------------------
-# 4. Full plugin-manifest health check
-# -------------------------------------------------------------------------
-bold "pre-push: [4/5] test_plugin_manifest.py (plugin structure health)"
-if ! python3 -m pytest "$TESTS_DIR/test_plugin_manifest.py" -q --no-header; then
+bold "pre-push: [3/4] test_plugin_manifest.py"
+if ! "$PYTEST_BIN" "$TESTS_DIR/test_plugin_manifest.py" -q --no-header; then
     fail "plugin manifest tests failed — the plugin would ship broken" \
         "Fix the failures above, then push again."
 fi
 
-# -------------------------------------------------------------------------
-# 5. Full test suite
-# -------------------------------------------------------------------------
-bold "pre-push: [5/5] full pytest suite"
-if ! python3 -m pytest "$TESTS_DIR" -q --no-header; then
+bold "pre-push: [4/4] full pytest suite"
+if ! "$PYTEST_BIN" "$TESTS_DIR" -q --no-header; then
     fail "tests failed — refusing to push"
 fi
 
 green "pre-push: all checks passed — push allowed"
-
-# -------------------------------------------------------------------------
-# Post-push: spawn background release creation.
-# The post-push script polls for the tag on the remote, then creates a
-# GitHub release. Runs detached so git push isn't blocked.
-# -------------------------------------------------------------------------
-POST_PUSH="$REPO_ROOT/.githooks/post-push"
-if [ -x "$POST_PUSH" ] && [ -n "${CURRENT_VERSION:-}" ]; then
-    nohup "$POST_PUSH" "v$CURRENT_VERSION" >/dev/null 2>&1 &
-    disown $! 2>/dev/null || true
-fi
-
 exit 0

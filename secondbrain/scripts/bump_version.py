@@ -2,8 +2,8 @@
 """
 bump_version.py — Bump version across all files that contain it.
 
-Ensures plugin.json, marketplace.json, and all SKILL.md frontmatter
-stay in sync. Bumps patch by default, or accepts explicit version.
+Ensures marketplace.json and all SKILL.md frontmatter stay in sync.
+Bumps patch by default, or accepts explicit version.
 
 Usage:
     python3 bump_version.py                    # auto bump patch
@@ -33,9 +33,12 @@ SKILL_VERSION_RE = re.compile(r'^(\s*version:\s*")([^"]+)(")', re.MULTILINE)
 
 
 def read_current_version() -> str:
-    """Read version from plugin.json (the canonical source)."""
-    data = json.loads(VERSION_FILES["plugin.json"].read_text())
-    return data["version"]
+    """Read version from marketplace.json (the canonical source)."""
+    data = json.loads(VERSION_FILES["marketplace.json"].read_text())
+    plugins = data.get("plugins", [])
+    if not plugins:
+        raise KeyError("marketplace.json has no plugins entry")
+    return plugins[0]["version"]
 
 
 def parse_version(v: str) -> Tuple[int, int, int]:
@@ -55,11 +58,6 @@ def find_skill_files() -> List[Path]:
 def get_all_versions() -> List[Tuple[str, str, Path]]:
     """Return [(source_name, version, path), ...] for all version locations."""
     versions = []
-
-    # plugin.json
-    p = VERSION_FILES["plugin.json"]
-    data = json.loads(p.read_text())
-    versions.append(("plugin.json", data["version"], p))
 
     # marketplace.json — two version locations that must stay in lockstep
     p = VERSION_FILES["marketplace.json"]
@@ -105,11 +103,12 @@ def set_version(new_version: str) -> int:
     """Set version everywhere. Returns count of files changed."""
     changed = 0
 
-    # plugin.json
+    # plugin.json should NOT carry a duplicated version field for the
+    # relative-path plugin. If a stale version key exists, remove it.
     p = VERSION_FILES["plugin.json"]
     data = json.loads(p.read_text())
-    if data["version"] != new_version:
-        data["version"] = new_version
+    if "version" in data:
+        del data["version"]
         p.write_text(json.dumps(data, indent=2) + "\n")
         changed += 1
 
@@ -144,6 +143,21 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
         ["git", "-C", str(REPO_ROOT), *args],
         capture_output=True, text=True, check=True,
     )
+
+
+def version_managed_paths() -> List[Path]:
+    paths = [VERSION_FILES["plugin.json"], VERSION_FILES["marketplace.json"]]
+    paths.extend(find_skill_files())
+    return paths
+
+
+def assert_release_tree_clean() -> bool:
+    """Release automation must start from a clean tree.
+
+    This prevents the old `git add -u` bug where a version bump commit could
+    accidentally capture unrelated tracked changes.
+    """
+    return _git("status", "--porcelain").stdout.strip() == ""
 
 
 def create_tag(version: str) -> int:
@@ -192,6 +206,14 @@ def release(new_version: Optional[str] = None) -> int:
     if new_version is None:
         new_version = bump_patch(current)
 
+    if not assert_release_tree_clean():
+        print(
+            "error: working tree is dirty — release automation refuses to "
+            "stage unrelated changes",
+            file=sys.stderr,
+        )
+        return 1
+
     # Bump version in all files
     print(f"{current} -> {new_version}")
     changed = set_version(new_version)
@@ -205,7 +227,8 @@ def release(new_version: Optional[str] = None) -> int:
         return 1
 
     # Stage and commit
-    _git("add", "-u")
+    stage_paths = [str(path.relative_to(REPO_ROOT)) for path in version_managed_paths()]
+    _git("add", "--", *stage_paths)
     _git("commit", "-m", f"Bump to {new_version}")
     print(f"Committed version bump")
 
@@ -230,6 +253,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if "--tag" in args:
         version = read_current_version()
         return create_tag(version)
+
+    if "--current" in args:
+        print(read_current_version())
+        return 0
 
     # Extract explicit version from args (first non-flag argument)
     explicit_version = None

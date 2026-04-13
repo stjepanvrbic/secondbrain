@@ -181,10 +181,11 @@ Everything except `init` and `doctor` runs automatically based on hooks, schedul
 
 ## Bundled scheduled tasks
 
-`init` installs 6 scheduled tasks by default (user can opt in/out per task during setup):
+`init` installs the bundled scheduled tasks from `secondbrain/scheduled-tasks/MANIFEST.md` by default (user can opt in/out per task during setup):
 
 | Task | Default cron | Skill |
 |---|---|---|
+| morning-brief | `0 8 * * *` (8:00am daily) | `secondbrain-morning-brief` (subagent) |
 | morning-briefing | `30 10 * * *` (10:30am daily) | `morning-brief` |
 | deadline-tracker | `0 13 * * *` (1pm daily) | `deadline-check` |
 | email-triage | `0 9 * * 1-5` (9am weekdays) | `email-triage` (requires Gmail MCP) |

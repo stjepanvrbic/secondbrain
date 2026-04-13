@@ -16,7 +16,7 @@ python3 secondbrain/scripts/install_git_hooks.py
 
 The plugin is Markdown skill files (under `secondbrain/skills/`) plus Python scripts (under `secondbrain/scripts/`). There's no build step.
 
-**`install_git_hooks.py` is required after cloning.** It wires `core.hooksPath = .githooks`, which installs the tracked `.githooks/pre-push` hook. That hook refuses to let you push a broken plugin — it runs the full test suite, checks version consistency across `plugin.json` / `marketplace.json` (both `metadata.version` and `plugins[].version`), verifies all hook command scripts are resolvable and executable, verifies no orphan scripts, and refuses pushes whose version is not strictly greater than the last git tag. The hook NEVER amends commits during push — if something is wrong, you fix it and push again.
+**`install_git_hooks.py` is required after cloning.** It wires `core.hooksPath = .githooks`, which installs the tracked `.githooks/pre-push` hook. That hook refuses to let you push a broken plugin — it runs the full test suite, checks version consistency across marketplace metadata and skill frontmatter, verifies all hook command scripts are resolvable and executable, verifies no orphan scripts, and refuses pushes whose release state is ambiguous. The hook NEVER amends commits during push — if something is wrong, you fix it and push again.
 
 ### Running tests
 
@@ -24,7 +24,7 @@ The plugin is Markdown skill files (under `secondbrain/skills/`) plus Python scr
 python3 -m pytest tests/ -v
 ```
 
-374 tests, zero external dependencies beyond pytest. Tests live at the repo root under `tests/` and are fully self-contained — they create temporary vaults, never touch real filesystems or shell configs, and clean up automatically.
+1178 tests, zero external dependencies beyond pytest. Tests live at the repo root under `tests/` and are fully self-contained — they create temporary vaults, never touch real filesystems or shell configs, and clean up automatically.
 
 ### Testing changes locally
 
@@ -51,7 +51,7 @@ Looking for first issues? These are good entry points:
 1. Fork the repo on GitHub
 2. Create a branch: `git checkout -b fix/short-description`
 3. Make your change
-4. **Run the test suite:** `python3 -m pytest tests/ -v` — all 374 tests must pass
+4. **Run the test suite:** `python3 -m pytest tests/ -v` — all 1178 tests must pass
 5. If you changed scripts, also test against a real vault: `python3 secondbrain/scripts/verify_vault.py ~/your-vault`
 6. Commit with a clear message — see "Commit messages" below
 7. Push and open a PR against `main`
