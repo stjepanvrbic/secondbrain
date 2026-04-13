@@ -298,6 +298,8 @@ updated: [TODAY]
 type: person | company | organization | place | tool
 domains: [domain1, domain2]
 relationship: [how user relates to this entity]
+aliases: [optional alternate names]
+parent_entity: optional-parent-slug
 created: [TODAY]
 updated: [TODAY]
 ---

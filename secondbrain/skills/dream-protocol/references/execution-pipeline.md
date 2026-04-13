@@ -154,10 +154,15 @@ ENDFOR
 
 ```
 FOR each broken link flagged in Phase 2.6:
-  1. Try to fix: search vault for likely match (fuzzy, >80% string similarity)
-  2. IF match found → update link (e.g., [[Acme Corp]] → [[entities/acme-corp|Acme Corp]])
+  1. Resolve against existing canonical entities in this order:
+     a. exact target
+     b. safe normalization (case/spacing/punctuation/legal-suffix only)
+     c. explicit `aliases:` frontmatter
+     d. parent fallback for known modifier variants
+     e. clear fuzzy match (>80% similarity and >20 point gap)
+  2. IF canonical entity found → update the link to the canonical entity and preserve the original display label
   3. IF no match found → mark "[BROKEN LINK: xxx]" for manual review
-  4. IF link points to entity that doesn't exist:
+  4. IF link still points to an actually-missing entity after all resolution steps:
      a. Create minimal entity file from template (@${CLAUDE_PLUGIN_ROOT}/references/templates.md)
      b. Note for manual review
 ENDFOR
@@ -173,11 +178,11 @@ FOR each [verify:: true] bullet row from Phase 2.7:
   2. Extract the target stem from the wikilink (e.g., `jane-smith` from
      `[[entities/jane-smith|Jane]]`) — this is what you fuzzy-match against
      filenames in entities/.
-  3. Fuzzy-match against existing entities/ files:
-     A clear canonical entity exists when a SINGLE candidate matches with
-     >80% similarity AND the gap to the next-best candidate is >20 percentage
-     points. Otherwise, treat as deferred. (Same mechanism as Phase 3.5,
-     section 3.5's wikilink repair.)
+  3. Resolve against existing entities in this order:
+     a. exact / normalized / explicit alias
+     b. parent fallback for known modifier variants
+     c. fuzzy match only if a SINGLE candidate is >80% similar and the gap
+        to the next-best candidate is >20 percentage points
   4. IF a clear canonical entity exists:
      a. Rewrite the bullet in the source file to point at the canonical wikilink
      b. Remove the `[verify:: true]` marker from that bullet
@@ -452,4 +457,3 @@ REBUILD _MANIFEST.md with the following structure:
 ```
 
 Ensure all links in manifest resolve. Remove archived projects from active domain list.
-

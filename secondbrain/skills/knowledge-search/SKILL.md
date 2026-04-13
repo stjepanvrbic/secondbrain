@@ -27,7 +27,7 @@ Use DQL queries to find information whenever possible, and read files only if yo
 
 | Question Type | Data Needed | Where to Look |
 |---------------|-------------|---------------|
-| Person/entity ("who is X") | Entity file + backlinks | entities/{name}.md, then graph_links or DQL |
+| Person/entity ("who is X") | Canonical entity file + backlinks | exact entity -> aliases/normalized variants -> parent expansion -> graph_links or DQL |
 | Timeline ("when is X due") | Tasks/deadlines with due dates | brain/status.md, brain/deadlines.md |
 | Status ("what's the status of X") | Recent activity | brain/status.md, {domain}/index.md |
 | Domain ("what's going on with X") | Overview + tasks | {domain}/index.md, status.md |
@@ -37,7 +37,7 @@ Use DQL queries to find information whenever possible, and read files only if yo
 
 ## Fallback Order
 1. DQL query / vault_search / graph_links
-2. Person/entity -> DQL on entities/ + graph_links for connections
+2. Person/entity -> canonical entity lookup (exact/normalized/alias/parent) + graph_links for connections
 3. Timeline/deadline -> DQL with date filter on status.md, deadlines.md
 4. Status -> vault_read status.md directly
 5. Relationship -> graph_links from entity
@@ -89,7 +89,7 @@ I don't have anything on that in your vault.
 
 **Status queries:** Search brain/status.md -> domain/index.md -> extract urgency/blockers/progress.
 
-**Person/entity queries:** Search entities/ → glossary.md → load entity file with details.
+**Person/entity queries:** Resolve the canonical entity first (exact slug, normalized name, explicit alias, then parent expansion when relevant), then load the canonical file and backlinks.
 
 **Decision queries:** Search brain/decisions.md -> domain files -> status.md for resulting tasks.
 
@@ -118,4 +118,4 @@ I don't have anything on that in your vault.
 - Search is CASE-INSENSITIVE
 - "Within 7 days" = next 7 calendar days
 - "Stale" = last updated >14 days ago
-- If entity has multiple name variations, search for all
+- If an entity has aliases or a narrower child form, resolve to the canonical entity first and expand to the parent entity when the child explicitly points there

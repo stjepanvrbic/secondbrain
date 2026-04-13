@@ -27,7 +27,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict
 from pathlib import Path
 from typing import List
 
@@ -41,74 +40,10 @@ from doctor_checks import (  # type: ignore[reportMissingImports]  # noqa: E402
     run_all_checks,
     run_fixable_treatments,
 )
-
-
-# ---------------------------------------------------------------------------
-# Formatting helpers
-# ---------------------------------------------------------------------------
-
-_STATUS_GLYPH = {
-    "pass": "[PASS]",
-    "fail": "[FAIL]",
-    "skip": "[SKIP]",
-    "warning": "[WARN]",
-}
-
-
-def _format_human(results: List[CheckResult]) -> str:
-    """Build the pretty diagnostic table as a plain string."""
-    lines: List[str] = []
-    lines.append("secondbrain doctor report:")
-    lines.append("")
-    for r in results:
-        glyph = _STATUS_GLYPH.get(r.status, "[?]")
-        lines.append(f"  {glyph} {r.name}: {r.message}")
-        if r.fixable and r.fix_function:
-            lines.append(f"         -> doctor can fix this (runs {r.fix_function})")
-    lines.append("")
-
-    passed = sum(1 for r in results if r.status == "pass")
-    failed = sum(1 for r in results if r.status == "fail")
-    warned = sum(1 for r in results if r.status == "warning")
-    skipped = sum(1 for r in results if r.status == "skip")
-    fixable = sum(1 for r in results if r.status == "fail" and r.fixable)
-    lines.append(
-        f"  Result: {passed} passed, {failed} failed, "
-        f"{warned} warning, {skipped} skipped."
-    )
-
-    if failed == 0 and warned == 0:
-        lines.append("")
-        lines.append("  Your secondbrain is healthy.")
-    else:
-        lines.append("")
-        if fixable > 0:
-            lines.append(f"  I can fix {fixable} of these — want me to? (yes/no)")
-        else:
-            lines.append(
-                "  None of the failures are auto-fixable. See per-check messages for manual steps."
-            )
-    return "\n".join(lines)
-
-
-def _serialize_results(results: List[CheckResult]) -> dict:
-    """Build the JSON payload for `--json` mode."""
-    passed = sum(1 for r in results if r.status == "pass")
-    failed = sum(1 for r in results if r.status == "fail")
-    warned = sum(1 for r in results if r.status == "warning")
-    skipped = sum(1 for r in results if r.status == "skip")
-    fixable = sum(1 for r in results if r.status == "fail" and r.fixable)
-    return {
-        "results": [asdict(r) for r in results],
-        "summary": {
-            "passed": passed,
-            "failed": failed,
-            "warning": warned,
-            "skipped": skipped,
-            "fixable_count": fixable,
-        },
-    }
-
+from doctor_report import (  # type: ignore[reportMissingImports]  # noqa: E402
+    format_human,
+    serialize_results,
+)
 
 # ---------------------------------------------------------------------------
 # Mode dispatch
@@ -124,10 +59,10 @@ def _diagnose(args: argparse.Namespace) -> int:
     results = run_all_checks(vault_path=vault_path, repo_root=repo_root)
 
     if args.json:
-        sys.stdout.write(json.dumps(_serialize_results(results), indent=2))
+        sys.stdout.write(json.dumps(serialize_results(results), indent=2))
         sys.stdout.write("\n")
     else:
-        sys.stdout.write(_format_human(results))
+        sys.stdout.write(format_human(results))
         sys.stdout.write("\n")
     sys.stdout.flush()
 
@@ -168,7 +103,7 @@ def _treat(args: argparse.Namespace) -> int:
     # Re-diagnose and report the new state.
     sys.stdout.write("\nRe-running diagnostic:\n\n")
     results2 = run_all_checks(vault_path=vault_path, repo_root=repo_root)
-    sys.stdout.write(_format_human(results2))
+    sys.stdout.write(format_human(results2))
     sys.stdout.write("\n")
     sys.stdout.flush()
 

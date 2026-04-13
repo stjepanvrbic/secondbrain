@@ -69,7 +69,7 @@ To remove: `CronDelete` with the task ID from `CronList`.
 
 ### Claude Cowork
 
-Tasks are registered via `/schedule` commands in the Cowork chat. Cowork manages them internally — there's no filesystem location to inspect.
+Tasks are registered via `/schedule` commands in the Cowork chat. Cowork manages them internally — there is no supported `.scheduled-tasks/` directory to inspect or verify against.
 
 To install: print copy-pasteable `/schedule` commands for the user:
 ```
@@ -119,7 +119,7 @@ The init script configures this automatically when running in Cowork.
 
 ## Vault access (Cowork only)
 
-Cowork is sandboxed. The vault path must be in the `localAgentModeTrustedFolders` array in `claude_desktop_config.json`:
+Cowork is sandboxed. The vault path must be in `preferences.localAgentModeTrustedFolders` inside `claude_desktop_config.json`:
 
 ```json
 {
@@ -130,6 +130,15 @@ Cowork is sandboxed. The vault path must be in the `localAgentModeTrustedFolders
 ```
 
 If the vault isn't trusted, Cowork can't read or write it. The init skill detects this and walks the user through adding it.
+
+### Desktop config overrides for scripts and tests
+
+The shared runtime resolver supports two environment overrides:
+
+- `SECONDBRAIN_VAULTS_CONFIG` — override the default `~/.config/secondbrain/vaults.json`
+- `SECONDBRAIN_CLAUDE_DESKTOP_CONFIG` — override the default Claude Desktop config path
+
+Scripts use these to stay aligned across Claude Code, Cowork, and tests.
 
 ## Marketplace update mechanism
 

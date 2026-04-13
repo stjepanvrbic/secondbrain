@@ -103,7 +103,7 @@ Check each of these and store the result:
 | `OBSIDIAN_MCP_PORT` env var set? | Same — check for substitution. If not set, the plugin's `.mcp.json` will fail to resolve the URL |
 | Existing vault? | Try `mcp__obsidian__vault_list` with path `/` — if it returns, a vault exists |
 
-**Cowork only:** Check `~/Library/Application Support/Claude/claude_desktop_config.json` for `localAgentModeTrustedFolders` array. Note which folders are trusted — the user's vault must live inside one of them.
+**Cowork only:** Check `~/Library/Application Support/Claude/claude_desktop_config.json` for `preferences.localAgentModeTrustedFolders`. Note which folders are trusted — the user's vault must live inside one of them.
 
 ## 1d. Print status table
 
@@ -250,7 +250,7 @@ Same write-or-print flow as 2d.
 
 ## 2f. Cowork-only: trusted folder check
 
-If `ENV == Cowork` and the user's intended vault path is NOT in `localAgentModeTrustedFolders`:
+If `ENV == Cowork` and the user's intended vault path is NOT in `preferences.localAgentModeTrustedFolders`:
 
 ```
 Cowork can only access folders you've marked as "trusted." Right now,
@@ -260,7 +260,7 @@ To fix:
 1. Quit Claude Desktop completely (Cmd+Q on Mac)
 2. Open this file in a text editor:
    ~/Library/Application Support/Claude/claude_desktop_config.json
-3. Find the "localAgentModeTrustedFolders" array (or add it if missing)
+3. Find the `preferences.localAgentModeTrustedFolders` array (or add it if missing)
 4. Add your vault path: "/Users/you/path/to/vault"
 5. Save the file
 6. Reopen Claude Desktop and switch back to Cowork
@@ -671,8 +671,7 @@ After all tasks: print `✓ Installed N scheduled tasks via CronCreate.`
 
 `CronCreate` is not available in Cowork. Instead:
 
-1. Copy each task's SKILL.md to `<workspace>/.scheduled-tasks/<task-name>/SKILL.md` so Cowork can discover them
-2. Print one copy-pasteable `/schedule` command for EACH opted-in row from `scheduled-tasks/MANIFEST.md`, preserving the manifest's operation target (`Run <skill>`). For the current default manifest the commands are:
+1. Print one copy-pasteable `/schedule` command for EACH opted-in row from `scheduled-tasks/MANIFEST.md`, preserving the manifest's operation target (`Run <skill>`). For the current default manifest the commands are:
 
 ```
 Cowork doesn't let plugins create scheduled tasks directly. To enable
@@ -696,7 +695,7 @@ After running these in Cowork, the listed scheduled tasks will be active.
 They run when Claude Desktop is open and your computer is awake.
 ```
 
-3. **Confirm registration before proceeding.** Cowork is out-of-band — the skill has no way to query whether the `/schedule` commands were actually accepted. Block here until the user acknowledges:
+2. **Confirm registration before proceeding.** Cowork is out-of-band — the skill has no way to query whether the `/schedule` commands were actually accepted. Block here until the user acknowledges:
 
 ```
 Confirm: did you paste all of the listed commands into Cowork chat and see them accepted? [y/n]
@@ -704,7 +703,7 @@ Confirm: did you paste all of the listed commands into Cowork chat and see them 
 
 If the user answers `y`, continue. If `n` (or anything else), re-print the listed commands and ask again. Do not advance to Step 6 until the user confirms `y`. If the user says they want to skip scheduled tasks entirely after seeing them, treat it as the 5a "skip" path and print the same "managed elsewhere" message.
 
-Print: `✓ Bundled N scheduled task templates. Run the /schedule commands above to activate them.`
+Print: `✓ Scheduled task commands prepared and confirmed in Cowork.`
 
 ---
 
@@ -830,19 +829,34 @@ Do NOT print the "Setup complete!" summary yet — Step 10 runs doctor first and
 
 ## 10a. Run doctor diagnose
 
-Invoke doctor in diagnose mode to confirm the install is healthy:
+Invoke doctor's raw diagnose mode to confirm the install is healthy:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --diagnose --vault "${VAULT_PATH}"
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --diagnose --vault "${VAULT_PATH}" --json > /tmp/sb-doctor-raw.json
 ```
 
-Capture stdout. Parse the summary line (`Result: X passed, Y failed, Z warning, W skipped.`).
+Then gather the same session-layer supplemental checks used by `/secondbrain:doctor`:
+
+- session MCP proof by reading `_MANIFEST.md` through Obsidian MCP
+- vault identity cross-check through filesystem + MCP
+- scheduled-task confirmation (`CronList` in Code, confirmed `/schedule` acceptance in Cowork)
+
+Write those supplemental results in the same JSON shape to `/tmp/sb-doctor-session.json`, then render the merged final report:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_report.py \
+  --raw-json /tmp/sb-doctor-raw.json \
+  --supplemental-json /tmp/sb-doctor-session.json \
+  --json > /tmp/sb-doctor-merged.json
+```
+
+Parse `/tmp/sb-doctor-merged.json`. Do NOT parse the human summary line from raw doctor output.
 
 ## 10b. Branch on diagnose result
 
-**If all checks pass (Y == 0):** proceed to 10d and print the success summary.
+**If merged doctor reports zero failures:** proceed to 10d and print the success summary.
 
-**If diagnose reports any failures (Y > 0):** proceed to 10c to treat them.
+**If merged doctor reports any failures:** proceed to 10c to treat them.
 
 ## 10c. Run doctor in treat mode
 
@@ -857,10 +871,14 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --treat --vault "${VAULT_PAT
 After treatment finishes, re-run diagnose to verify:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --diagnose --vault "${VAULT_PATH}"
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --diagnose --vault "${VAULT_PATH}" --json > /tmp/sb-doctor-raw.json
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_report.py \
+  --raw-json /tmp/sb-doctor-raw.json \
+  --supplemental-json /tmp/sb-doctor-session.json \
+  --json > /tmp/sb-doctor-merged.json
 ```
 
-**If the re-diagnose is clean:** proceed to 10d.
+**If the merged re-diagnose is clean:** proceed to 10d.
 
 **If there are still failures:** list each remaining failure with the escalation instruction from doctor's output. Do NOT print "Setup complete!" — tell the user exactly what manual step is needed. Offer to re-run init, or point them at `/secondbrain:doctor` for a standalone treatment turn.
 
@@ -921,7 +939,7 @@ Run these checks and print pass/fail for each:
 8. `log.md` exists in the vault?
 9. `me/profile.md` exists with non-placeholder content?
 10. Standard folders present (brain/, entities/, inbox/, me/, archive/)?
-11. Scheduled tasks registered? (Code: `CronList`. Cowork: check `<workspace>/.scheduled-tasks/`)
+11. Scheduled tasks registered? (Code: `CronList`. Cowork: confirm the `/schedule` commands were accepted)
 12. Last dream-protocol run successful? (Look at the most recent `dream-protocol` entry in `log.md`)
 
 Print a summary like:

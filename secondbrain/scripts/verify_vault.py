@@ -25,6 +25,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+from entity_resolver import (  # type: ignore[reportMissingImports]
+    EntityRegistry,
+    entity_target_stem,
+    humanize_entity_name,
+)
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -131,6 +137,7 @@ class VaultIndex:
         self.path_to_headings: Dict[Path, List[Tuple[int, str]]] = {}  # (level, text)
         self.relative_to_abs: Dict[str, Path] = {}
         self.all_paths: List[Path] = []
+        self.entity_registry = EntityRegistry(())
 
         self._build()
 
@@ -150,6 +157,8 @@ class VaultIndex:
                 self.stem_to_paths.setdefault(stem_lower, []).append(abs_path)
 
                 self.path_to_headings[abs_path] = self._extract_headings(abs_path)
+
+        self.entity_registry = EntityRegistry.from_vault(self.vault_root, self.all_paths)
 
     @staticmethod
     def _extract_headings(path: Path) -> List[Tuple[int, str]]:
@@ -174,6 +183,7 @@ class VaultIndex:
         scoped.stem_to_paths = self.stem_to_paths
         scoped.path_to_headings = self.path_to_headings
         scoped.relative_to_abs = self.relative_to_abs
+        scoped.entity_registry = self.entity_registry
 
         target_paths: Set[Path] = set()
         for f in files:
@@ -213,6 +223,12 @@ def parse_wikilink(raw: str) -> Tuple[str, str]:
     return target, ""
 
 
+def wikilink_display_text(raw: str) -> str:
+    if "|" not in raw:
+        return ""
+    return raw.split("|", 1)[1].strip()
+
+
 def _slugify_wikilink_target(target: str) -> str:
     """Normalize a display-style link target into a kebab-case slug."""
     slug = target.lower().strip()
@@ -250,23 +266,18 @@ def resolve_wikilink(target: str, index: VaultIndex) -> Optional[Path]:
         if rel_str.lower().endswith(target_lower):
             return abs_path
 
-    # 4. Compatibility fallbacks for legacy display-style links.
+    # 4. Domain index fallback.
     target_stem = target.removesuffix(".md").rsplit("/", 1)[-1]
     slug = _slugify_wikilink_target(target_stem)
     if slug:
-        for cand in (
-            f"entities/{slug}.md",
-            f"{slug}/{slug}-index.md",
-            slug,
-        ):
-            if cand in index.relative_to_abs:
-                return index.relative_to_abs[cand]
+        domain_index = f"{slug}/{slug}-index.md"
+        if domain_index in index.relative_to_abs:
+            return index.relative_to_abs[domain_index]
 
-        matches = index.stem_to_paths.get(slug, [])
-        if len(matches) == 1:
-            return matches[0]
-        if matches:
-            return matches[0]
+    # 5. Strict entity-name resolution.
+    entity_match = index.entity_registry.resolve_existing(target_stem)
+    if entity_match is not None:
+        return entity_match.record.path
 
     return None
 
@@ -295,7 +306,8 @@ class BrokenWikilinkChecker:
             for line_no, line in enumerate(cleaned.split("\n"), start=1):
                 for m in WIKILINK_RE.finditer(line):
                     total_links += 1
-                    target, section = parse_wikilink(m.group(1))
+                    raw_link = m.group(1)
+                    target, section = parse_wikilink(raw_link)
                     if section.startswith("^"):
                         continue
 
@@ -304,8 +316,8 @@ class BrokenWikilinkChecker:
                         broken_files += 1
                         issues.append(Issue(
                             check=self.NAME, severity="error", file=rel, line=line_no,
-                            message=f"Broken wikilink: [[{m.group(1)}]] — target not found",
-                            suggestion=self._suggest(target, index),
+                            message=f"Broken wikilink: [[{raw_link}]] — target not found",
+                            suggestion=self._suggest(target, raw_link, index),
                         ))
                     elif resolved and section:
                         headings = [h for _, h in index.path_to_headings.get(resolved, [])]
@@ -323,7 +335,13 @@ class BrokenWikilinkChecker:
         )
 
     @staticmethod
-    def _suggest(target: str, index: VaultIndex) -> str:
+    def _suggest(target: str, raw_link: str, index: VaultIndex) -> str:
+        if target.startswith("entities/"):
+            match = index.entity_registry.suggest_canonical(target)
+            if match is not None:
+                display = wikilink_display_text(raw_link) or humanize_entity_name(entity_target_stem(target))
+                return f"Use: [[entities/{match.record.slug}|{display}]]"
+
         stem = target.lower().rsplit("/", 1)[-1].removesuffix(".md")
         candidates = [s for s in index.stem_to_paths if stem in s or s in stem]
         return f"Did you mean: {', '.join(candidates[:3])}?" if candidates else ""
@@ -633,6 +651,9 @@ class EntityStubChecker:
                     continue
                 resolved = resolve_wikilink(target, index)
                 if resolved is None:
+                    canonical = index.entity_registry.suggest_canonical(target)
+                    if canonical is not None:
+                        continue
                     name = target.removeprefix("entities/").removesuffix(".md")
                     missing.setdefault(name, []).append(rel)
 
@@ -773,14 +794,13 @@ class UnconvertedReferenceChecker:
 
         entity_names: Dict[str, str] = {}
         entity_paths: Set[Path] = set()
-        for abs_path in index.all_paths:
-            rel = index.rel(abs_path)
-            if not rel.startswith("entities/"):
-                continue
-            entity_paths.add(abs_path)
-            stem = abs_path.stem
-            if len(stem) >= self.MIN_STEM_LEN:
-                entity_names[stem.replace("-", " ").lower()] = rel
+        for record in index.entity_registry.records:
+            entity_paths.add(record.path)
+            entity_rel = record.rel_path
+            for name in record.search_names:
+                if len(entity_target_stem(name)) < self.MIN_STEM_LEN:
+                    continue
+                entity_names.setdefault(name.lower(), entity_rel)
 
         if not entity_names:
             return CheckResult(name=self.NAME, issues=[], stats={})

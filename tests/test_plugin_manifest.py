@@ -48,8 +48,11 @@ CLI_ENTRYPOINT_ALLOWLIST = {
     "release_workflow.py",     # pure release-state planner used by pre-push
     "setup_steps.py",          # library-only: imported by init + doctor (wired up in T3/T6)
     "connect_mcp_client.py",   # library-only: imported by dream/hot-memory/doctor (wired up in T10/T11/T13/T14)
+    "runtime_resolver.py",     # library-only: imported by connect/doctor/hot-memory
+    "entity_resolver.py",      # library-only: imported by verify_vault
     "doctor_checks.py",        # library-only: imported by doctor_cli (T5)
     "doctor_cli.py",           # CLI entry: invoked by the doctor skill via Bash (T5)
+    "doctor_report.py",        # CLI/helper: merges raw doctor JSON with session-layer evidence
     "vault_git.py",            # CLI entry: invoked by Stop hook + undo-last-turn skill (wired up in T8/T9)
     "hot_memory_schema.py",    # library-only: imported by validate_hot_memory + update_hot_memory (T10)
     "validate_hot_memory.py",  # CLI entry: invoked by doctor/dream-protocol/ingester (wired up in T11/T13)

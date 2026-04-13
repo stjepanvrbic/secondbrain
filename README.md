@@ -132,7 +132,10 @@ v3 introduces a **script-first architecture**: deterministic tasks are handled b
 | `scripts/setup_steps.py` | Shared setup primitives used by both init and doctor (env vars, scaffolding, vault config, marker UUID) |
 | `scripts/connect_mcp_client.py` | HTTP wrapper around the Connect MCP API — lets scripts talk to Obsidian without going through Claude's tool layer |
 | `scripts/vault_git.py` | Git operations on the vault — init, commit, push, reset. CLI subcommands for hooks and skills. |
-| `scripts/doctor_checks.py` | 16-check engine for `/secondbrain:doctor` — diagnose-then-treat with dependency ordering |
+| `scripts/doctor_checks.py` | Check engine for `/secondbrain:doctor` — diagnose-then-treat with dependency ordering |
+| `scripts/doctor_report.py` | Merges raw subprocess doctor JSON with stronger session-layer results and renders the final report |
+| `scripts/runtime_resolver.py` | Shared vaults.json, Claude Desktop config, and Obsidian MCP runtime resolution |
+| `scripts/entity_resolver.py` | Shared canonical entity matching for verification, retarget suggestions, and search expansion |
 | `scripts/hot_memory_schema.py` | Schema definition and validator for `brain/hot-memory.md` (the pre-computed session context) |
 | `scripts/update_hot_memory.py` | The ONLY writer of `brain/hot-memory.md` — regenerate from vault state or apply incremental updates |
 | `scripts/emit_hot_memory.py` | Reads hot-memory and emits the SessionStart `systemMessage` JSON (called by the hook) |
@@ -141,7 +144,7 @@ v3 introduces a **script-first architecture**: deterministic tasks are handled b
 
 **Hook enforcement:** A `PreToolUse` hook (`hooks/enforce-mcp-only.sh`) blocks `Edit`/`Write`/`NotebookEdit` on vault paths and restricts `Bash` writes to a sanctioned-script allowlist. A `PostToolUse` hook (`hooks/validate-after-write.sh`) runs `verify_vault.py` after every vault write (MCP or sanctioned-script). If integrity checks fail, the agent is blocked until it fixes the issues.
 
-**Testing:** 1178 tests across the `tests/` suite (pytest, zero external dependencies). All scripts tested on macOS, Windows, and Linux.
+**Testing:** The `tests/` suite covers the script and hook contracts end-to-end with pytest and zero external dependencies. All core scripts are exercised on macOS, Windows, and Linux.
 
 ---
 
@@ -197,7 +200,7 @@ Then restart Claude Code/Cowork.
 
 ### "Cowork can't see my vault"
 
-Cowork is sandboxed — it can only access folders listed in `localAgentModeTrustedFolders` in `~/Library/Application Support/Claude/claude_desktop_config.json`. Add your vault path to that array, then quit and reopen Claude Desktop.
+Cowork is sandboxed — it can only access folders listed in `preferences.localAgentModeTrustedFolders` in `~/Library/Application Support/Claude/claude_desktop_config.json`. Add your vault path there, then quit and reopen Claude Desktop.
 
 ### "Scheduled tasks aren't running in Cowork"
 
@@ -209,7 +212,7 @@ Cowork doesn't support direct GitHub install for individual users — only organ
 
 ### "Something is broken and I don't know what"
 
-Run `/secondbrain:doctor` — it runs a 16-point read-only diagnostic and tells you exactly what's failing. If any checks fail, it asks "want me to fix these?" and can auto-repair most issues on your confirmation.
+Run `/secondbrain:doctor` — it runs the raw subprocess checks, supplements them with session-only Cowork/Code evidence where available, and tells you exactly what's failing. If any fixable checks fail, it asks "want me to fix these?" and can auto-repair those on your confirmation.
 
 ### "I want to start over"
 

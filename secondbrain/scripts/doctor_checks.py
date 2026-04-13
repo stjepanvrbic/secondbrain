@@ -54,6 +54,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
+from runtime_resolver import (  # type: ignore[reportMissingImports]
+    resolve_claude_desktop_config_path,
+    resolve_obsidian_runtime,
+    resolve_vaults_config_path,
+)
 
 # Ensure sibling modules (setup_steps, connect_mcp_client) are importable.
 # When installed as a plugin, scripts/ is the cwd for hook invocations; when
@@ -136,11 +141,7 @@ def _detect_environment() -> str:
 
 def _default_cowork_desktop_config_path() -> Path:
     """Return the Claude Desktop config path for the current platform."""
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
-    if sys.platform.startswith("win"):
-        return Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
-    return Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+    return resolve_claude_desktop_config_path()
 
 
 def _load_cowork_obsidian_server(
@@ -295,14 +296,34 @@ def check_obsidian_api_key(
     """
     env = environment or _detect_environment()
     if env == "cowork":
-        key = _cowork_obsidian_api_key(desktop_config_path)
-        if key:
+        resolved = resolve_obsidian_runtime(desktop_config_path=desktop_config_path)
+        if resolved.api_key:
             return CheckResult(
                 name="obsidian_api_key",
                 status="pass",
-                message="Obsidian API key is configured in Cowork desktop config",
+                message=(
+                    "Obsidian API key is available from "
+                    + ("Cowork desktop config" if resolved.api_key_source == "desktop_config" else "environment")
+                ),
                 fixable=False,
             )
+        detail = (
+            f" Desktop config path: {resolved.desktop_config_path}."
+            if resolved.desktop_config_path
+            else ""
+        )
+        if resolved.error:
+            detail += f" Parse error: {resolved.error}."
+        return CheckResult(
+            name="obsidian_api_key",
+            status="warning",
+            message=(
+                "Could not prove the Obsidian API key from the Python subprocess in Cowork; "
+                "session-level validation is required."
+                + detail
+            ),
+            fixable=False,
+        )
 
     key = os.environ.get("OBSIDIAN_API_KEY", "")
     if not key:
@@ -339,14 +360,34 @@ def check_obsidian_mcp_port(
     """
     env = environment or _detect_environment()
     if env == "cowork":
-        port = _cowork_obsidian_port(desktop_config_path)
-        if port is not None:
+        resolved = resolve_obsidian_runtime(desktop_config_path=desktop_config_path)
+        if resolved.port is not None:
             return CheckResult(
                 name="obsidian_mcp_port",
                 status="pass",
-                message=f"Cowork desktop config points obsidian MCP at port {port}",
+                message=(
+                    f"Obsidian MCP port is available from "
+                    f"{'Cowork desktop config' if resolved.port_source == 'desktop_config' else 'environment'}: {resolved.port}"
+                ),
                 fixable=False,
             )
+        detail = (
+            f" Desktop config path: {resolved.desktop_config_path}."
+            if resolved.desktop_config_path
+            else ""
+        )
+        if resolved.error:
+            detail += f" Parse error: {resolved.error}."
+        return CheckResult(
+            name="obsidian_mcp_port",
+            status="warning",
+            message=(
+                "Could not prove the Obsidian MCP port from the Python subprocess in Cowork; "
+                "session-level validation is required."
+                + detail
+            ),
+            fixable=False,
+        )
 
     port_str = os.environ.get("OBSIDIAN_MCP_PORT", "")
     if not port_str:
@@ -388,14 +429,14 @@ def _build_mcp_client(
 ) -> Any:
     """Construct a ConnectMCPClient for the current environment."""
     import connect_mcp_client  # type: ignore[reportMissingImports]
-
-    env = environment or _detect_environment()
-    if env == "cowork":
-        port = _cowork_obsidian_port(desktop_config_path)
-        api_key = _cowork_obsidian_api_key(desktop_config_path)
-        if port is not None and api_key:
-            return connect_mcp_client.ConnectMCPClient(port=port, api_key=api_key)
-    return connect_mcp_client.ConnectMCPClient()
+    resolved = resolve_obsidian_runtime(desktop_config_path=desktop_config_path)
+    if resolved.port is not None and resolved.api_key:
+        return connect_mcp_client.ConnectMCPClient(
+            port=resolved.port,
+            api_key=resolved.api_key,
+            desktop_config_path=desktop_config_path,
+        )
+    return connect_mcp_client.ConnectMCPClient(desktop_config_path=desktop_config_path)
 
 
 def check_obsidian_running(
@@ -420,10 +461,10 @@ def check_obsidian_running(
         except Exception as exc:  # noqa: BLE001
             return CheckResult(
                 name="obsidian_running",
-                status="fail",
+                status="warning",
                 message=(
-                    "Could not confirm Obsidian from Cowork via Connect MCP: "
-                    f"{exc}. Open Obsidian and make sure Connect MCP is enabled."
+                    "Could not confirm Obsidian from the Cowork Python subprocess: "
+                    f"{exc}. Session-level validation is required."
                 ),
                 fixable=False,
             )
@@ -551,6 +592,17 @@ def check_mcp_connection(
     try:
         client = client_factory()
     except Exception as exc:  # noqa: BLE001 — factory may raise anything
+        env = environment or _detect_environment()
+        if env == "cowork":
+            return CheckResult(
+                name="mcp_connection",
+                status="warning",
+                message=(
+                    f"Could not construct an MCP client from the Cowork Python subprocess: {exc}. "
+                    "Session-level validation is required."
+                ),
+                fixable=False,
+            )
         return CheckResult(
             name="mcp_connection",
             status="fail",
@@ -766,8 +818,8 @@ def check_scheduled_tasks(env: str) -> CheckResult:
     definitively verify the state; it returns a warning with a note telling
     the agent to verify via CronList in the surrounding skill body.
 
-    In Cowork, we check for `.scheduled-tasks/` SKILL.md files inside
-    the workspace if we can find it.
+    In Cowork, the authoritative verification lives in the surrounding
+    session layer via the scheduled-tasks tool, not in a filesystem probe.
     """
     if env == "code":
         return CheckResult(
@@ -787,9 +839,8 @@ def check_scheduled_tasks(env: str) -> CheckResult:
         name="scheduled_tasks",
         status="warning",
         message=(
-            "scheduled-task presence is verified by the init skill in Cowork "
-            "via workspace/.scheduled-tasks — doctor cannot definitively "
-            "check this from a subprocess."
+            "scheduled-task presence in Cowork must be verified from the session layer "
+            "via the scheduled-tasks tool — doctor cannot definitively check this from a subprocess."
         ),
         fixable=False,
     )
@@ -918,8 +969,8 @@ def check_vault_identity_cross(
     if mcp_client is None:
         return CheckResult(
             name="vault_identity_cross",
-            status="fail",
-            message="no MCP client available to cross-check vault_id",
+            status="warning",
+            message="no MCP client available to cross-check vault_id — session-level validation is required",
             fixable=False,
         )
 
@@ -930,7 +981,7 @@ def check_vault_identity_cross(
         if isinstance(exc, FileNotFoundError) or "file not found" in exc_message:
             return CheckResult(
                 name="vault_identity_cross",
-                status="fail",
+                status="warning",
                 message=(
                     "MCP could not read .secondbrain-installed. Dotfiles may be hidden "
                     "from Obsidian MCP in this environment, so doctor cannot prove the "
@@ -1235,13 +1286,13 @@ def check_vaults_config() -> CheckResult:
     enforce-mcp-only) fail silently — no session logging, no per-turn
     commits, no immutability enforcement.
     """
-    config_path = Path.home() / ".config" / "secondbrain" / "vaults.json"
+    config_path = resolve_vaults_config_path()
     if not config_path.exists():
         return CheckResult(
             name="vaults_config",
             status="fail",
             message=(
-                "~/.config/secondbrain/vaults.json missing — all hooks disabled "
+                f"{config_path} missing — all hooks disabled "
                 "(no session logging, no per-turn commits, no immutability enforcement). "
                 "Run /secondbrain:init to create it."
             ),
@@ -1496,11 +1547,20 @@ def run_all_checks(
     )
 
     # Check 6 — MCP connection.
-    if api_key_result.status != "pass" or port_result.status != "pass":
+    if api_key_result.status == "fail" or port_result.status == "fail":
         mcp_result = CheckResult(
             name="mcp_connection",
             status="fail",
             message="cannot check MCP because obsidian_api_key and/or obsidian_mcp_port failed",
+            fixable=False,
+        )
+    elif env == "cowork" and (
+        api_key_result.status == "warning" or port_result.status == "warning"
+    ):
+        mcp_result = CheckResult(
+            name="mcp_connection",
+            status="warning",
+            message="cannot prove MCP connectivity from the Cowork Python subprocess — session-level validation is required",
             fixable=False,
         )
     else:

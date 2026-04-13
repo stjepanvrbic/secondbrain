@@ -180,6 +180,7 @@ def env_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure the env vars are not set."""
     monkeypatch.delenv("OBSIDIAN_MCP_PORT", raising=False)
     monkeypatch.delenv("OBSIDIAN_API_KEY", raising=False)
+    monkeypatch.setenv("SECONDBRAIN_CLAUDE_DESKTOP_CONFIG", "/nonexistent/claude_desktop_config.json")
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +235,28 @@ class TestConstructionMissingEnv:
         client = ConnectMCPClient(port=12345, api_key="explicit-key")
         assert client.port == 12345
         assert client.api_key == "explicit-key"
+
+    def test_desktop_config_fallback_allows_construction_without_env(
+        self,
+        tmp_path: Path,
+    ):
+        cfg = tmp_path / "claude_desktop_config.json"
+        cfg.write_text(json.dumps({
+            "mcpServers": {
+                "obsidian": {
+                    "args": [
+                        "mcp-remote",
+                        "http://localhost:27124/mcp",
+                        "--header",
+                        "Authorization:${AUTH}",
+                    ],
+                    "env": {"AUTH": "Bearer desktop-key"},
+                }
+            }
+        }))
+        client = ConnectMCPClient(desktop_config_path=cfg)
+        assert client.port == 27124
+        assert client.api_key == "desktop-key"
 
 
 # ---------------------------------------------------------------------------

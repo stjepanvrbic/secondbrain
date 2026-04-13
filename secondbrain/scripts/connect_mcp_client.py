@@ -29,10 +29,12 @@ from __future__ import annotations
 
 import itertools
 import json
-import os
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from runtime_resolver import resolve_obsidian_runtime
 
 
 # ---------------------------------------------------------------------------
@@ -100,33 +102,26 @@ class ConnectMCPClient:
         api_key: Optional[str] = None,
         host: str = "localhost",
         timeout: float = 10.0,
+        desktop_config_path: Optional[Path] = None,
     ):
-        # Resolve port — explicit wins, else env var, else failure.
-        env_port = os.environ.get("OBSIDIAN_MCP_PORT")
-        if port is not None:
-            self.port: int = int(port)
-        elif env_port:
-            try:
-                self.port = int(env_port)
-            except ValueError as exc:
-                raise ConnectMCPUnreachable(
-                    f"OBSIDIAN_MCP_PORT is not a valid integer: {env_port!r}"
-                ) from exc
-        else:
+        resolved = resolve_obsidian_runtime(
+            port=port,
+            api_key=api_key,
+            desktop_config_path=desktop_config_path,
+        )
+        if resolved.error:
+            raise ConnectMCPUnreachable(resolved.error)
+        if resolved.port is None:
             raise ConnectMCPUnreachable(
                 "OBSIDIAN_MCP_PORT not set and no explicit port passed to ConnectMCPClient"
             )
-
-        # Resolve API key.
-        env_key = os.environ.get("OBSIDIAN_API_KEY")
-        if api_key is not None:
-            self.api_key: str = api_key
-        elif env_key:
-            self.api_key = env_key
-        else:
+        if not resolved.api_key:
             raise ConnectMCPUnreachable(
                 "OBSIDIAN_API_KEY not set and no explicit api_key passed to ConnectMCPClient"
             )
+
+        self.port = resolved.port
+        self.api_key = resolved.api_key
 
         self.host = host
         self.timeout = timeout

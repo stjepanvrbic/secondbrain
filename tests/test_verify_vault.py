@@ -124,6 +124,17 @@ class TestWikilinkResolution:
         result = resolve_wikilink("Prime Trading", index)
         assert result == tmp_vault / "entities" / "prime-trading.md"
 
+    def test_title_normalization_handles_punctuation_and_skeleton(self, tmp_vault: Path):
+        (tmp_vault / "entities" / "etrade.md").write_text("# E*TRADE\n")
+        index = VaultIndex(tmp_vault)
+        assert resolve_wikilink("E trade", index) == tmp_vault / "entities" / "etrade.md"
+        assert resolve_wikilink("e-trade", index) == tmp_vault / "entities" / "etrade.md"
+
+    def test_title_normalization_handles_legal_suffixes(self, tmp_vault: Path):
+        (tmp_vault / "entities" / "naya-law-group.md").write_text("# Naya Law Group\n")
+        index = VaultIndex(tmp_vault)
+        assert resolve_wikilink("Naya Law Group PC", index) == tmp_vault / "entities" / "naya-law-group.md"
+
 
 # ---------------------------------------------------------------------------
 # VaultIndex
@@ -199,6 +210,17 @@ class TestBrokenWikilinkChecker:
         result = BrokenWikilinkChecker().run(index)
         warnings = [i for i in result.issues if i.severity == "warning"]
         assert any("Nonexistent Section" in i.message for i in warnings)
+
+    def test_parent_fallback_link_gets_retarget_suggestion_not_stub_hint(self, tmp_vault: Path):
+        (tmp_vault / "entities" / "stairhopper.md").write_text("# Stairhopper\n")
+        (tmp_vault / "brain" / "status.md").write_text(
+            "# Status\n\n- [ ] Confirm date [[entities/stairhopper-movers|Stairhopper Movers]]\n"
+        )
+        index = VaultIndex(tmp_vault)
+        result = BrokenWikilinkChecker().run(index)
+        issue = next(i for i in result.issues if "stairhopper-movers" in i.message)
+        assert issue.severity == "error"
+        assert "Use: [[entities/stairhopper|Stairhopper Movers]]" in issue.suggestion
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +405,15 @@ class TestEntityStubChecker:
         result = EntityStubChecker().run(index)
         assert not any("brain/" in i.file for i in result.issues)
 
+    def test_parent_fallback_candidate_not_reported_as_missing_entity(self, tmp_vault: Path):
+        (tmp_vault / "entities" / "stairhopper.md").write_text("# Stairhopper\n")
+        (tmp_vault / "brain" / "status.md").write_text(
+            "# Status\n\n- [ ] Confirm date [[entities/stairhopper-movers|Stairhopper Movers]]\n"
+        )
+        index = VaultIndex(tmp_vault)
+        result = EntityStubChecker().run(index)
+        assert not any("stairhopper-movers" in i.file for i in result.issues)
+
 
 # ---------------------------------------------------------------------------
 # OrphanDetector
@@ -493,6 +524,18 @@ class TestUnconvertedReferenceChecker:
         # The wikilinked "Bob" should not appear as a suggestion
         note_issues = [i for i in result.issues if i.file == "scratch/note.md"]
         assert not note_issues
+
+    def test_uses_entity_title_for_plain_text_detection(self, tmp_vault: Path):
+        (tmp_vault / "entities" / "mmh.md").write_text("# MMH\n\nMinsky McCormick & Hallagan.\n")
+        (tmp_vault / "scratch" / "note.md").write_text("Need to email Minsky McCormick & Hallagan.\n")
+        index = VaultIndex(tmp_vault)
+        result = UnconvertedReferenceChecker().run(index)
+        assert any(
+            i.file == "scratch/note.md"
+            and "Minsky McCormick & Hallagan" in i.message
+            and "[[entities/mmh|Minsky McCormick & Hallagan]]" in i.suggestion
+            for i in result.issues
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -212,7 +212,13 @@ class TestCheckObsidianApiKey:
         assert r.status == "pass"
         assert r.fixable is False
 
-    def test_pass_when_cowork_desktop_config_has_auth(self, tmp_path: Path):
+    def test_pass_when_cowork_desktop_config_has_auth(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        for var in ("OBSIDIAN_API_KEY", "OBSIDIAN_MCP_PORT"):
+            monkeypatch.delenv(var, raising=False)
         cfg = tmp_path / "claude_desktop_config.json"
         cfg.write_text(json.dumps({
             "mcpServers": {
@@ -251,6 +257,19 @@ class TestCheckObsidianApiKey:
         assert r.status == "fail"
         assert r.fixable is False
 
+    def test_cowork_missing_config_degrades_to_warning(
+        self,
+        clean_env: None,
+        tmp_path: Path,
+    ):
+        del clean_env
+        r = check_obsidian_api_key(
+            environment="cowork",
+            desktop_config_path=tmp_path / "missing.json",
+        )
+        assert r.status == "warning"
+        assert "session-level" in r.message.lower() or "desktop config" in r.message.lower()
+
 
 # ---------------------------------------------------------------------------
 # check_obsidian_mcp_port — Check 4
@@ -262,7 +281,13 @@ class TestCheckObsidianMcpPort:
         r = check_obsidian_mcp_port(environment="code")
         assert r.status == "pass"
 
-    def test_pass_when_cowork_desktop_config_has_port(self, tmp_path: Path):
+    def test_pass_when_cowork_desktop_config_has_port(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        for var in ("OBSIDIAN_API_KEY", "OBSIDIAN_MCP_PORT"):
+            monkeypatch.delenv(var, raising=False)
         cfg = tmp_path / "claude_desktop_config.json"
         cfg.write_text(json.dumps({
             "mcpServers": {
@@ -300,6 +325,19 @@ class TestCheckObsidianMcpPort:
         # Still not fixable — user must set a valid number themselves.
         assert r.fixable is False
 
+    def test_cowork_missing_config_degrades_to_warning(
+        self,
+        clean_env: None,
+        tmp_path: Path,
+    ):
+        del clean_env
+        r = check_obsidian_mcp_port(
+            environment="cowork",
+            desktop_config_path=tmp_path / "missing.json",
+        )
+        assert r.status == "warning"
+        assert "session-level" in r.message.lower() or "desktop config" in r.message.lower()
+
 
 # ---------------------------------------------------------------------------
 # check_obsidian_running — Check 5
@@ -331,6 +369,14 @@ class TestCheckObsidianRunning:
         assert r.status == "fail"
         assert r.fixable is False
 
+    def test_cowork_factory_error_degrades_to_warning(self):
+        r = check_obsidian_running(
+            environment="cowork",
+            client_factory=lambda: (_ for _ in ()).throw(RuntimeError("no config")),
+        )
+        assert r.status == "warning"
+        assert "session-level" in r.message.lower() or "config" in r.message.lower()
+
 
 # ---------------------------------------------------------------------------
 # check_mcp_connection — Check 6
@@ -351,9 +397,16 @@ class TestCheckMcpConnection:
     def test_fail_when_factory_raises(self):
         def factory():
             raise RuntimeError("port not set")
-        r = check_mcp_connection(client_factory=factory)
+        r = check_mcp_connection(environment="code", client_factory=factory)
         assert r.status == "fail"
         assert "port not set" in r.message or "factory" in r.message.lower() or "unreachable" in r.message.lower()
+
+    def test_cowork_factory_error_degrades_to_warning(self):
+        def factory():
+            raise RuntimeError("desktop config unavailable")
+        r = check_mcp_connection(environment="cowork", client_factory=factory)
+        assert r.status == "warning"
+        assert "session-level" in r.message.lower() or "desktop config" in r.message.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +625,8 @@ class TestCheckScheduledTasks:
     def test_cowork_mode(self):
         r = check_scheduled_tasks("cowork")
         assert r.status == "warning"
+        assert ".scheduled-tasks" not in r.message
+        assert "scheduled-tasks tool" in r.message.lower() or "session layer" in r.message.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -667,7 +722,7 @@ class TestCheckVaultIdentityCross:
 
     def test_fail_when_mcp_client_none(self, healthy_vault: Path):
         r = check_vault_identity_cross(healthy_vault, mcp_client=None)
-        assert r.status == "fail"
+        assert r.status == "warning"
 
     def test_fail_when_mcp_cannot_read_dotfile(
         self,
@@ -676,12 +731,30 @@ class TestCheckVaultIdentityCross:
     ):
         mock_mcp_client.vault_read.side_effect = FileNotFoundError("File not found")
         r = check_vault_identity_cross(healthy_vault, mcp_client=mock_mcp_client)
-        assert r.status == "fail"
+        assert r.status == "warning"
         assert (
             "dotfile" in r.message.lower()
             or "cannot prove" in r.message.lower()
             or "vault_path" in r.message.lower()
         )
+
+
+class TestCheckVaultsConfig:
+    def test_honors_vaults_config_override(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
+        config_path = tmp_path / "config" / "secondbrain" / "vaults.json"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text(json.dumps({
+            "schema_version": 1,
+            "vaults": [],
+            "active_vault_id": "vault-1",
+        }))
+        monkeypatch.setenv("SECONDBRAIN_VAULTS_CONFIG", str(config_path))
+        r = doctor_module.check_vaults_config()
+        assert r.status == "pass"
 
 
 # ---------------------------------------------------------------------------

@@ -272,6 +272,45 @@ class TestRegenerateMCPUnreachable:
         assert "unreach" in captured.err.lower() or "mcp" in captured.err.lower()
 
 
+class TestRuntimeResolution:
+    def test_default_client_factory_uses_desktop_config_fallback(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
+        for var in ("OBSIDIAN_MCP_PORT", "OBSIDIAN_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        cfg = tmp_path / "claude_desktop_config.json"
+        cfg.write_text(json.dumps({
+            "mcpServers": {
+                "obsidian": {
+                    "args": [
+                        "mcp-remote",
+                        "http://localhost:27124/mcp",
+                        "--header",
+                        "Authorization:${AUTH}",
+                    ],
+                    "env": {"AUTH": "Bearer desktop-key"},
+                }
+            }
+        }))
+        monkeypatch.setenv("SECONDBRAIN_CLAUDE_DESKTOP_CONFIG", str(cfg))
+        client = update_hot_memory._default_client_factory()
+        assert client.port == 27124
+        assert client.api_key == "desktop-key"
+
+    def test_system_alerts_honor_vaults_config_override(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
+        config_path = tmp_path / "config" / "secondbrain" / "vaults.json"
+        monkeypatch.setenv("SECONDBRAIN_VAULTS_CONFIG", str(config_path))
+        text = update_hot_memory._build_system_alerts(tmp_path / "vault")
+        assert text is not None
+        assert str(config_path) in text
+
+
 # ---------------------------------------------------------------------------
 # --apply: incremental section updates from a JSON draft
 # ---------------------------------------------------------------------------

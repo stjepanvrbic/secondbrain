@@ -54,7 +54,20 @@ Why structured instead of a prose comment:
 
 Field order when combined with task metadata: append `[verify:: true]` at the END of the line, AFTER `[est::]`. Do not insert it mid-sequence.
 
-### Rule 2b — Blockquote backlinks for superseded content
+### Rule 2b — Canonical entity resolution before writing
+
+Entity names are resolved in this order:
+
+1. Exact canonical entity (`entities/<slug>.md`)
+2. Safe normalization match (case, spacing, punctuation, `&`, and trailing legal suffixes only)
+3. Explicit `aliases:` frontmatter on the canonical entity
+4. Parent fallback for clearly narrower variants (`Prime Trading Team` -> `prime-trading`, `Best Buy Visa` -> `best-buy`) when the extra words are known modifiers
+5. Clear fuzzy guess -> write the canonical link **and** add `[verify:: true]`
+6. No candidate -> create a new entity stub
+
+Safe normalization only removes formatting differences and trailing legal suffixes such as `LLC`, `Ltd`, or `PC`. It does **not** strip semantic words like `team`, `visa`, `pro`, `plus`, `bank`, or `movers`.
+
+### Rule 2c — Blockquote backlinks for superseded content
 
 When dream-protocol soft-archives contradicted content (Phase 3.12), the live file keeps a blockquote backlink pointing at the archive copy: `> Archived at [[archive/contradictions/YYYY-MM/<slug>]]`. The blockquote form makes it visually distinct from live content and searchable as a DQL pattern. Never rewrite or strip these backlinks — they are the recoverability path for the archived resolution.
 
@@ -71,13 +84,13 @@ Structure every write as an atomic section with a clear, searchable heading, 1-3
 
 ## Rule 4 — Entity Stubs on Reference
 
-If a write mentions a new entity that does not yet have a file in `entities/`, create a stub. Use the entity template in `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`, or run the helper:
+Only create a stub when the resolver cannot map the name to an existing canonical entity by exact match, normalization, alias, parent fallback, or clear fuzzy guess. Use the entity template in `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`, or run the helper:
 
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py ${VAULT_PATH} kebab-name
 ```
 
-Never leave a `[[wikilink]]` pointing at a file that does not exist. Create the stub as part of the same write.
+Never leave a `[[wikilink]]` pointing at a file that does not exist. If the name is just a narrower variant of an existing entity, link the canonical entity and preserve the original phrase as the display label instead of creating a duplicate child stub.
 
 ## Rule 5 — No New Task Files
 

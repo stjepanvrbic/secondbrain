@@ -61,6 +61,7 @@ from hot_memory_schema import (  # type: ignore[reportMissingImports]
     parse_sections,
     validate,
 )
+from runtime_resolver import resolve_vaults_config_path  # type: ignore[reportMissingImports]
 
 
 HOT_MEMORY_PATH = "brain/hot-memory.md"
@@ -251,10 +252,10 @@ def _build_system_alerts(vault_path: Optional[Path]) -> Optional[str]:
                 "may pollute agent context. Safe to delete or archive."
             )
 
-    vaults_config = Path.home() / ".config" / "secondbrain" / "vaults.json"
+    vaults_config = resolve_vaults_config_path()
     if not vaults_config.exists():
         alerts.append(
-            "`vaults.json` missing — session hooks disabled (no session logging, "
+            f"`vaults.json` missing at `{vaults_config}` — session hooks disabled (no session logging, "
             "no per-turn commits, no immutability enforcement). "
             "Run `/secondbrain:init` or `/secondbrain:doctor` to fix."
         )

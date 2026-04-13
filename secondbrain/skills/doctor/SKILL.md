@@ -59,23 +59,40 @@ It **MUST** print the diagnostic report, end with the "want me to fix?"
 question, and then **STOP**.
 
 1. Run `doctor_cli.py --diagnose --vault "${VAULT_PATH}"` via the `Bash`
-   tool. Collect stdout. This is MANDATORY — do not skip this step.
-2. **Additionally, from inside the agent session**, run the two checks
-   doctor_cli.py cannot do on its own:
+   tool in JSON mode and capture the raw subprocess results:
+
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_cli.py --diagnose --vault "${VAULT_PATH}" --json > /tmp/sb-doctor-raw.json
+   ```
+
+   This is MANDATORY — do not skip this step.
+2. **Additionally, from inside the agent session**, gather the session-layer
+   checks doctor_cli.py cannot do on its own:
+   - **Session MCP proof (Check 6 / runtime warnings):** read `_MANIFEST.md`
+     via Obsidian MCP. If the session can read it, that is the canonical
+     proof that MCP is reachable from the actual agent session. In Cowork,
+     raw subprocess warnings such as "session-level validation required"
+     MUST be replaced with this stronger session evidence.
    - **Vault identity cross-check (Check 6.5):** read `.secondbrain-installed`
      via the filesystem at `${VAULT_PATH}`, then read the same file via
      `mcp__obsidian__vault_read`. Compare the `vault_id` field. If they
      match, report pass. If they don't, LOUDLY report the mismatch — this
      is a config conflict, not a fix target. Tell the user to reconcile
      VAULT_PATH vs the open Obsidian vault.
-   - **Scheduled tasks (Check 12):** call `CronList` (Code) or inspect
-     `<workspace>/.scheduled-tasks/` (Cowork) and verify the bundled
-     tasks from `scheduled-tasks/MANIFEST.md` are registered. Report count.
-3. Print the full report combining both sources. Summarize as:
+   - **Scheduled tasks (Check 12):** call `CronList` (Code) or Cowork's
+     scheduled-task tooling / explicit user confirmation. Verify the
+     bundled tasks from `scheduled-tasks/MANIFEST.md` are registered.
+3. Assemble those session-layer results into the same JSON shape as
+   `doctor_cli.py --diagnose --json` and render the final merged report:
 
    ```
-   Result: X passed, Y failed, Z warning, W skipped.
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/doctor_report.py \
+     --raw-json /tmp/sb-doctor-raw.json \
+     --supplemental-json /tmp/sb-doctor-session.json
    ```
+
+   Do NOT parse or summarize the raw CLI output first. The merged report is
+   the source of truth.
 
 4. If any failure is fixable by doctor's Phase 2, end with:
 
@@ -198,24 +215,21 @@ On confirmation:
 
 # Output Format
 
-The CLI produces a table like this — pass it through to the user verbatim:
+The merged report produces a table like this — pass it through to the user verbatim:
 
 ```
 secondbrain doctor report:
 
   [PASS] plugin_root: CLAUDE_PLUGIN_ROOT=/Users/you/.claude/plugins/...
   [PASS] environment: environment: Claude Code
-  [FAIL] obsidian_api_key: OBSIDIAN_API_KEY is not set. ...
-         -> escalation: run /secondbrain:init (doctor cannot mint an API key)
-  [FAIL] obsidian_mcp_port: OBSIDIAN_MCP_PORT is not set. ...
-         -> escalation: run /secondbrain:init or export manually
-  [PASS] obsidian_running: Obsidian process detected via pgrep
-  [SKIP] mcp_connection: skipped because OBSIDIAN_API_KEY / OBSIDIAN_MCP_PORT are not set
+  [PASS] obsidian_api_key: Session MCP probe reached Obsidian using the active Cowork config
+  [PASS] obsidian_running: Session MCP probe reached _MANIFEST.md
+  [PASS] mcp_connection: Session MCP probe succeeded
   [FAIL] log_md: log.md (append-only audit trail) is missing. ...
          -> doctor can fix this (runs create_log_md)
   ...
 
-  Result: 7 passed, 3 failed, 0 warning, 5 skipped.
+  Result: 9 passed, 1 failed, 0 warning, 0 skipped.
 
   I can fix 1 of these — want me to? (yes/no)
 ```
