@@ -1040,12 +1040,11 @@ def check_plugin_version_mismatch(
     plugin_root: Path,
     latest_release_fetcher: Optional[Callable[[str], str]] = None,
 ) -> CheckResult:
-    """Compare installed marketplace version against the latest published release.
+    """Compare installed runtime plugin version against the latest published release.
 
-    The runtime plugin is a relative-path marketplace entry, so the version
-    source of truth lives in `<repo>/.claude-plugin/marketplace.json`, not in
-    `plugin.json`. The doctor check compares that installed marketplace version
-    with the latest GitHub release tag and cleanly skips offline.
+    Cowork's extracted runtime bundle carries its own `plugin.json`. That file
+    is the concrete thing the user is actually running, so doctor compares its
+    version against the latest GitHub release tag and cleanly skips offline.
     """
     plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
     if not plugin_json.is_file():
@@ -1066,24 +1065,12 @@ def check_plugin_version_mismatch(
             fixable=False,
         )
 
-    repo_root = plugin_root.parent
-    installed_marketplace = repo_root / ".claude-plugin" / "marketplace.json"
-    if not installed_marketplace.is_file():
+    installed_version = plugin_data.get("version")
+    if not isinstance(installed_version, str) or not installed_version:
         return CheckResult(
             name="plugin_version_mismatch",
             status="skip",
-            message="cannot find installed marketplace.json",
-            fixable=False,
-        )
-
-    try:
-        installed_data = json.loads(installed_marketplace.read_text())
-        installed_version = installed_data["plugins"][0]["version"]
-    except Exception:
-        return CheckResult(
-            name="plugin_version_mismatch",
-            status="skip",
-            message="cannot read installed marketplace version",
+            message="installed plugin.json is missing a version field",
             fixable=False,
         )
 
@@ -1112,7 +1099,7 @@ def check_plugin_version_mismatch(
         return CheckResult(
             name="plugin_version_mismatch",
             status="pass",
-            message=f"installed marketplace version {installed_version} matches latest release",
+            message=f"installed runtime plugin version {installed_version} matches latest release",
             fixable=False,
         )
 
@@ -1120,7 +1107,7 @@ def check_plugin_version_mismatch(
         name="plugin_version_mismatch",
         status="warning",
         message=(
-            f"installed marketplace version {installed_version} but latest release is "
+            f"installed runtime plugin version {installed_version} but latest release is "
             f"{latest_version}. In Cowork, remove and reinstall the plugin from the marketplace."
         ),
         fixable=False,

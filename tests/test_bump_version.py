@@ -43,8 +43,8 @@ class TestCheckConsistency:
 
     def test_counts_all_files(self):
         versions = get_all_versions()
-        # marketplace metadata + marketplace plugin version + 13 skills = 15
-        assert len(versions) >= 15
+        # plugin.json + marketplace metadata + marketplace plugin version + 13 skills = 16
+        assert len(versions) >= 16
 
 
 class TestReadCurrentVersion:
@@ -62,7 +62,8 @@ class TestSetVersion:
         plugin_dir = tmp_path / ".claude-plugin"
         plugin_dir.mkdir()
         (plugin_dir / "plugin.json").write_text(json.dumps({
-            "name": "test"
+            "name": "test",
+            "version": "1.0.0",
         }))
         (plugin_dir / "marketplace.json").write_text(json.dumps({
             "name": "test",
@@ -99,11 +100,11 @@ class TestSetVersion:
             bump_version.SKILLS_DIR = tmp_path / "skills"
 
             changed = set_version("2.0.0")
-            assert changed >= 3  # marketplace + 2 skills
+            assert changed == 5  # plugin.json + marketplace metadata + plugin version + 2 skills
 
             # Verify plugin.json
             data = json.loads((plugin_dir / "plugin.json").read_text())
-            assert "version" not in data
+            assert data["version"] == "2.0.0"
 
             # Verify marketplace.json
             data = json.loads((plugin_dir / "marketplace.json").read_text())
@@ -123,7 +124,8 @@ class TestSetVersion:
         plugin_dir = tmp_path / ".claude-plugin"
         plugin_dir.mkdir()
         (plugin_dir / "plugin.json").write_text(json.dumps({
-            "name": "test"
+            "name": "test",
+            "version": "2.0.0",
         }))
         (plugin_dir / "marketplace.json").write_text(json.dumps({
             "name": "test",
@@ -162,7 +164,8 @@ class TestMain:
         plugin_dir = tmp_path / ".claude-plugin"
         plugin_dir.mkdir()
         (plugin_dir / "plugin.json").write_text(json.dumps({
-            "name": "test"
+            "name": "test",
+            "version": "1.0.0",
         }))
         (plugin_dir / "marketplace.json").write_text(json.dumps({
             "name": "test",
@@ -188,7 +191,7 @@ class TestMain:
             code = main(["5.0.0"])
             assert code == 0
             data = json.loads((plugin_dir / "plugin.json").read_text())
-            assert "version" not in data
+            assert data["version"] == "5.0.0"
             marketplace = json.loads((plugin_dir / "marketplace.json").read_text())
             assert marketplace["plugins"][0]["version"] == "5.0.0"
         finally:

@@ -16,7 +16,7 @@ import json
 import sys
 import uuid
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 from unittest.mock import MagicMock
 
 import pytest
@@ -389,12 +389,20 @@ class TestCheckStandardFolders:
 # ---------------------------------------------------------------------------
 
 class TestCheckPluginVersionMismatch:
-    def _write_installed_plugin(self, plugin_root: Path, version: str) -> None:
+    def _write_installed_plugin(
+        self,
+        plugin_root: Path,
+        plugin_version: str,
+        marketplace_version: Optional[str] = None,
+    ) -> None:
+        if marketplace_version is None:
+            marketplace_version = plugin_version
         (plugin_root / ".claude-plugin").mkdir(parents=True, exist_ok=True)
         (plugin_root / ".claude-plugin" / "plugin.json").write_text(
             json.dumps(
                 {
                     "name": "secondbrain",
+                    "version": plugin_version,
                     "description": "x",
                     "repository": "https://github.com/stjepanvrbic/secondbrain",
                 }
@@ -405,8 +413,8 @@ class TestCheckPluginVersionMismatch:
         (repo_root / ".claude-plugin" / "marketplace.json").write_text(
             json.dumps(
                 {
-                    "metadata": {"version": version},
-                    "plugins": [{"name": "secondbrain", "version": version, "source": "./secondbrain"}],
+                    "metadata": {"version": marketplace_version},
+                    "plugins": [{"name": "secondbrain", "version": marketplace_version, "source": "./secondbrain"}],
                 }
             )
         )
@@ -432,6 +440,21 @@ class TestCheckPluginVersionMismatch:
             latest_release_fetcher=lambda _repo: "v3.5.12",
         )
         assert r.status == "pass"
+
+    def test_uses_installed_runtime_plugin_version(self, tmp_path: Path):
+        plugin_root = tmp_path / "secondbrain"
+        plugin_root.mkdir()
+        self._write_installed_plugin(
+            plugin_root,
+            plugin_version="3.5.11",
+            marketplace_version="3.5.12",
+        )
+        r = check_plugin_version_mismatch(
+            plugin_root,
+            latest_release_fetcher=lambda _repo: "v3.5.11",
+        )
+        assert r.status == "pass"
+        assert "runtime plugin version 3.5.11" in r.message
 
     def test_skip_when_latest_release_cannot_be_fetched(self, tmp_path: Path):
         plugin_root = tmp_path / "secondbrain"

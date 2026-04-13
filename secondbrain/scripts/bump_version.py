@@ -59,6 +59,13 @@ def get_all_versions() -> List[Tuple[str, str, Path]]:
     """Return [(source_name, version, path), ...] for all version locations."""
     versions = []
 
+    # plugin.json — Cowork installs and extracted runtime bundles consult the
+    # shipped plugin manifest version when deciding whether the plugin changed.
+    # If this drifts from marketplace.json, updates can silently stop landing.
+    p = VERSION_FILES["plugin.json"]
+    data = json.loads(p.read_text())
+    versions.append(("plugin.json (version)", data.get("version", ""), p))
+
     # marketplace.json — two version locations that must stay in lockstep
     p = VERSION_FILES["marketplace.json"]
     data = json.loads(p.read_text())
@@ -103,12 +110,12 @@ def set_version(new_version: str) -> int:
     """Set version everywhere. Returns count of files changed."""
     changed = 0
 
-    # plugin.json should NOT carry a duplicated version field for the
-    # relative-path plugin. If a stale version key exists, remove it.
+    # plugin.json — runtime/plugin install manifest version. Keep this in
+    # lockstep with marketplace.json so Cowork sees the plugin itself change.
     p = VERSION_FILES["plugin.json"]
     data = json.loads(p.read_text())
-    if "version" in data:
-        del data["version"]
+    if data.get("version") != new_version:
+        data["version"] = new_version
         p.write_text(json.dumps(data, indent=2) + "\n")
         changed += 1
 

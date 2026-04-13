@@ -4,7 +4,7 @@ Enforce-not-document. Every failure in this file is a bug the user would hit
 during install or update. Runs against the live repo state, not fixtures.
 
 Checks:
-    - marketplace.json owns plugin versioning for the relative-path plugin
+    - plugin.json version stays in lockstep with marketplace plugin version
     - marketplace.json source path resolves to a real plugin dir
     - hooks/hooks.json schema and every command resolves to an executable file
     - Every command uses ${CLAUDE_PLUGIN_ROOT} (no hardcoded paths)
@@ -146,11 +146,18 @@ def parse_semver(v: str) -> tuple[int, int, int]:
 # ----------------------------------------------------------------------
 
 class TestVersionConsistency:
-    def test_plugin_json_does_not_define_version_for_relative_path_plugin(self):
+    def test_plugin_json_version_matches_marketplace_plugin_version(self):
         pj = load_json(PLUGIN_JSON)
-        assert "version" not in pj, (
-            "relative-path plugins should not duplicate version in plugin.json; "
-            "marketplace.json is the source of truth for update detection"
+        mj = load_json(MARKETPLACE_JSON)
+        plugin_version = mj["plugins"][0]["version"]
+        assert "version" in pj, (
+            "plugin.json is missing version. Cowork installs and runtime bundles "
+            "key off the shipped plugin manifest; removing this field regresses "
+            "update detection."
+        )
+        assert pj["version"] == plugin_version, (
+            f"plugin.json version {pj['version']!r} != marketplace plugin version "
+            f"{plugin_version!r}. bump_version.py must keep both in lockstep."
         )
 
     def test_marketplace_metadata_version_matches_plugin_version(self):
