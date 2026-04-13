@@ -24,7 +24,7 @@ The plugin is Markdown skill files (under `secondbrain/skills/`) plus Python scr
 python3 -m pytest tests/ -v
 ```
 
-1178 tests, zero external dependencies beyond pytest. Tests live at the repo root under `tests/` and are fully self-contained — they create temporary vaults, never touch real filesystems or shell configs, and clean up automatically.
+The suite has 1200+ tests and zero external dependencies beyond pytest. Tests live at the repo root under `tests/` and are fully self-contained — they create temporary vaults, never touch real filesystems or shell configs, and clean up automatically.
 
 ### Testing changes locally
 
@@ -51,7 +51,7 @@ Looking for first issues? These are good entry points:
 1. Fork the repo on GitHub
 2. Create a branch: `git checkout -b fix/short-description`
 3. Make your change
-4. **Run the test suite:** `python3 -m pytest tests/ -v` — all 1178 tests must pass
+4. **Run the test suite:** `python3 -m pytest tests/ -v` — the full suite must pass
 5. If you changed scripts, also test against a real vault: `python3 secondbrain/scripts/verify_vault.py ~/your-vault`
 6. Commit with a clear message — see "Commit messages" below
 7. Push and open a PR against `main`
@@ -66,7 +66,7 @@ Looking for first issues? These are good entry points:
 2. If the version was manually bumped but not tagged, the hook auto-creates the tag. Push again.
 3. If everything is already in order, the push goes through.
 
-`push.followTags` is configured automatically (via `install_git_hooks.py`) so tags are carried with the push. GitHub Actions creates a GitHub Release when the tag arrives.
+`push.followTags` is configured automatically (via `install_git_hooks.py`) so tags are carried with the push. GitHub Actions creates or updates the tagged GitHub Release when the tag arrives and uploads the installable `secondbrain-vX.Y.Z.zip` asset that Cowork expects.
 
 **Manual override:** `python3 secondbrain/scripts/bump_version.py --release` does bump + commit + tag in one shot if you prefer to control the version number (e.g., `--release 4.0.0` for a major bump).
 
