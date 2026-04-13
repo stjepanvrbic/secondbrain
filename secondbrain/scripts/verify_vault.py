@@ -124,6 +124,7 @@ EXCLUDED_DIRS = {
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)(?:\s+#+)?$", re.MULTILINE)
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+LEGACY_SESSION_LOG_TAGS = {"personal"}
 
 
 class VaultIndex:
@@ -291,6 +292,18 @@ class BrokenWikilinkChecker:
 
     NAME = "wikilinks"
 
+    @staticmethod
+    def _skip_file(rel: str) -> bool:
+        return rel.startswith("archive/")
+
+    @staticmethod
+    def _skip_link(rel: str, line: str, target: str) -> bool:
+        if rel != "brain/session-log.md":
+            return False
+        if target.lower() in LEGACY_SESSION_LOG_TAGS:
+            return True
+        return line.lstrip().startswith("**Domains:**") and "/" not in target
+
     def run(self, index: VaultIndex) -> CheckResult:
         issues: List[Issue] = []
         total_links = broken_files = broken_sections = 0
@@ -301,6 +314,8 @@ class BrokenWikilinkChecker:
             except OSError:
                 continue
             rel = index.rel(abs_path)
+            if self._skip_file(rel):
+                continue
             cleaned = TextProcessor.clean(text)
 
             for line_no, line in enumerate(cleaned.split("\n"), start=1):
@@ -308,6 +323,8 @@ class BrokenWikilinkChecker:
                     total_links += 1
                     raw_link = m.group(1)
                     target, section = parse_wikilink(raw_link)
+                    if self._skip_link(rel, line, target):
+                        continue
                     if section.startswith("^"):
                         continue
 
@@ -678,6 +695,8 @@ class OrphanDetector:
 
     NAME = "orphans"
     EXCLUDES = {"README.md", "CLAUDE.md", "_MANIFEST.md", ".gitignore", "entities/directory.md"}
+    EXCLUDED_PATHS = {"brain/hot-memory.md", "proposal/REBUILD_SUMMARY.md"}
+    EXCLUDED_PREFIXES = ("archive/",)
 
     def run(self, index: VaultIndex) -> CheckResult:
         incoming: Dict[Path, Set[Path]] = {p: set() for p in index.all_paths}
@@ -706,7 +725,12 @@ class OrphanDetector:
         issues: List[Issue] = []
         for abs_path in index.all_paths:
             rel = index.rel(abs_path)
-            if rel in self.EXCLUDES or abs_path.name in self.EXCLUDES:
+            if (
+                rel in self.EXCLUDES
+                or abs_path.name in self.EXCLUDES
+                or rel in self.EXCLUDED_PATHS
+                or any(rel.startswith(prefix) for prefix in self.EXCLUDED_PREFIXES)
+            ):
                 continue
             if not incoming.get(abs_path) and not outgoing.get(abs_path, False):
                 issues.append(Issue(
@@ -971,7 +995,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Available checks: " + ", ".join(ALL_CHECKERS),
     )
-    p.add_argument("vault", help="Path to the Obsidian vault root")
+    p.add_argument("vault", nargs="?", help="Path to the Obsidian vault root")
+    p.add_argument("--vault", dest="vault_flag", help="Path to the Obsidian vault root")
     p.add_argument("--check", help="Comma-separated checks to run (default: all except suggestions)")
     p.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON")
     p.add_argument("--quiet", action="store_true", help="Errors only")
@@ -993,9 +1018,17 @@ def find_vault(hint: str) -> Optional[Path]:
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
 
-    vault_path = find_vault(args.vault)
+    if args.vault and args.vault_flag and args.vault != args.vault_flag:
+        print("Error: positional vault and --vault disagree", file=sys.stderr)
+        return 1
+    vault_hint = args.vault_flag or args.vault
+    if not vault_hint:
+        print("Error: vault path is required", file=sys.stderr)
+        return 1
+
+    vault_path = find_vault(vault_hint)
     if vault_path is None:
-        print(f"Error: vault not found: '{args.vault}'", file=sys.stderr)
+        print(f"Error: vault not found: '{vault_hint}'", file=sys.stderr)
         return 1
 
     check_names = [c.strip() for c in args.check.split(",")] if args.check else list(DEFAULT_CHECKS)

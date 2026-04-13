@@ -299,6 +299,45 @@ class TestRuntimeResolution:
         assert client.port == 27124
         assert client.api_key == "desktop-key"
 
+    def test_main_passes_explicit_desktop_config_path_to_default_factory(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        healthy_vault_files: Dict[str, str],
+    ):
+        captured: Dict[str, Path | None] = {"desktop_config_path": None}
+
+        def fake_default_client_factory(
+            *,
+            port=None,
+            api_key=None,
+            desktop_config_path=None,
+        ):
+            del port, api_key
+            captured["desktop_config_path"] = desktop_config_path
+            return FakeMCPClient(healthy_vault_files)
+
+        cfg = tmp_path / "claude_desktop_config.json"
+        cfg.write_text("{}")
+        monkeypatch.setattr(
+            update_hot_memory,
+            "_default_client_factory",
+            fake_default_client_factory,
+            raising=True,
+        )
+
+        rc = update_hot_memory.main(
+            argv=[
+                "--regenerate",
+                "--vault",
+                str(tmp_path),
+                "--desktop-config-path",
+                str(cfg),
+            ],
+        )
+        assert rc == 0
+        assert captured["desktop_config_path"] == cfg
+
     def test_system_alerts_honor_vaults_config_override(
         self,
         monkeypatch: pytest.MonkeyPatch,

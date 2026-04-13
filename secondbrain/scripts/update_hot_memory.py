@@ -82,12 +82,21 @@ SOURCE_LOG = "log.md"
 ClientFactory = Callable[[], object]
 
 
-def _default_client_factory() -> ConnectMCPClient:
+def _default_client_factory(
+    *,
+    port: Optional[int] = None,
+    api_key: Optional[str] = None,
+    desktop_config_path: Optional[Path] = None,
+) -> ConnectMCPClient:
     """Default factory — constructs a real ConnectMCPClient.
 
     Tests pass their own factory into `main(..., client_factory=...)`.
     """
-    return ConnectMCPClient()
+    return ConnectMCPClient(
+        port=port,
+        api_key=api_key,
+        desktop_config_path=desktop_config_path,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -506,6 +515,19 @@ def build_parser() -> argparse.ArgumentParser:
             "to MCP, which already knows the vault)."
         ),
     )
+    parser.add_argument(
+        "--desktop-config-path",
+        help="Claude desktop config to use for Obsidian MCP runtime resolution.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        help="Explicit Obsidian MCP port override.",
+    )
+    parser.add_argument(
+        "--api-key",
+        help="Explicit Obsidian MCP API key override.",
+    )
     return parser
 
 
@@ -531,7 +553,14 @@ def main(
         return 1
 
     if client_factory is None:
-        client_factory = _default_client_factory
+        desktop_config_path = Path(args.desktop_config_path) if args.desktop_config_path else None
+
+        def client_factory() -> object:
+            return _default_client_factory(
+                port=args.port,
+                api_key=args.api_key,
+                desktop_config_path=desktop_config_path,
+            )
 
     try:
         client = client_factory()

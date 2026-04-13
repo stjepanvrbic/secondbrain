@@ -17,7 +17,7 @@ Canonical: validate the vault and emit a JSON report of issues.
 ### Full scan (JSON)
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} --json
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py --vault "${VAULT_PATH}" --json
 ```
 
 Use after dream-protocol consolidation, weekly-review, or any time a full
@@ -27,7 +27,7 @@ human-readable text.
 ### Modified-only scan (after a write)
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} --modified-only file1.md file2.md --json
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py --vault "${VAULT_PATH}" --modified-only file1.md file2.md --json
 ```
 
 Use in the **post-write validation** step of every skill that touches the
@@ -38,7 +38,7 @@ their link targets, so it is fast enough to run after every write.
 ### Auto-fix pass
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} --fix
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py --vault "${VAULT_PATH}" --fix
 ```
 
 Fixes what can be fixed mechanically (duplicate headings, etc.). Use inside
@@ -153,7 +153,7 @@ Names are in kebab-case and correspond to `entities/{name}.md`.
 ### From verify output
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} --json > /tmp/sb-verify.json
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py --vault "${VAULT_PATH}" --json > /tmp/sb-verify.json
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py ${VAULT_PATH} --from-json /tmp/sb-verify.json
 ```
 
@@ -170,10 +170,22 @@ verbatim:
 
 ```bash
 # 1. Verify modified files
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py ${VAULT_PATH} --modified-only <files-you-touched> --json
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py --vault "${VAULT_PATH}" --modified-only <files-you-touched> --json
 
 # 2. If missing-entity errors, create stubs
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/create_entity_stubs.py ${VAULT_PATH} <entity-name>
 
 # 3. Do NOT mark the operation complete until verification passes.
 ```
+
+## `update_hot_memory.py` — regenerate hot memory from live vault state
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/update_hot_memory.py \
+  --regenerate \
+  --vault "${VAULT_PATH}" \
+  --desktop-config-path "${SECONDBRAIN_CLAUDE_DESKTOP_CONFIG:-$HOME/Library/Application Support/Claude/claude_desktop_config.json}"
+```
+
+Use this in Dream Protocol after manifest rebuild and commit. The run is only
+complete when hot-memory regeneration succeeds against the current live vault state.

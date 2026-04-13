@@ -3,6 +3,11 @@
 > Detailed procedures for each phase of the nightly vault maintenance run.
 > Named DQL queries referenced below are defined once in
 > `@${CLAUDE_PLUGIN_ROOT}/references/dql-patterns.md`.
+>
+> The orchestrator runs two focused workers in sequence:
+> semantic consolidation first, structural maintenance second.
+> Final success requires the healthy-vault target from
+> `@${CLAUDE_PLUGIN_ROOT}/references/healthy-vault.md`.
 
 ---
 
@@ -89,6 +94,8 @@ Do NOT resolve contradictions here — only gather. Phase 3.12 soft-archives the
 ## Phase 3 — Consolidate
 
 Process everything gathered in Phase 2. Each procedure below corresponds to signal identified during gathering.
+
+This entire phase belongs to the semantic worker.
 
 ### 3.1 Inbox Processing
 
@@ -363,6 +370,9 @@ by reading the archive + sidecar pair.
 ---
 
 ## Phase 4 — Verify & Index
+
+This entire phase belongs to the structural worker. It is not complete until
+final verification returns `0 errors, 0 warnings`.
 
 Verification runs BEFORE manifest rebuild so the manifest reflects the verified state of the vault.
 

@@ -628,6 +628,79 @@ class TestCheckScheduledTasks:
         assert ".scheduled-tasks" not in r.message
         assert "scheduled-tasks tool" in r.message.lower() or "session layer" in r.message.lower()
 
+    def test_passes_when_manifest_tasks_are_present_and_enabled(self, tmp_path: Path):
+        manifest = tmp_path / "MANIFEST.md"
+        manifest.write_text(
+            "\n".join(
+                [
+                    "# Bundled Scheduled Tasks",
+                    "",
+                    "| Task | Cron | Skill | Default |",
+                    "|---|---|---|---|",
+                    "| morning-briefing | 30 10 * * * | /secondbrain:morning-brief | on |",
+                    "| dream-protocol | 0 2 * * * | /secondbrain:dream-protocol | on |",
+                ]
+            )
+        )
+
+        r = check_scheduled_tasks(
+            "cowork",
+            actual_tasks=[
+                {"taskId": "morning-briefing", "enabled": True},
+                {"taskId": "dream-protocol", "enabled": True},
+            ],
+            manifest_path=manifest,
+        )
+        assert r.status == "pass"
+
+    def test_fails_when_manifest_task_missing(self, tmp_path: Path):
+        manifest = tmp_path / "MANIFEST.md"
+        manifest.write_text(
+            "\n".join(
+                [
+                    "# Bundled Scheduled Tasks",
+                    "",
+                    "| Task | Cron | Skill | Default |",
+                    "|---|---|---|---|",
+                    "| morning-briefing | 30 10 * * * | /secondbrain:morning-brief | on |",
+                    "| dream-protocol | 0 2 * * * | /secondbrain:dream-protocol | on |",
+                ]
+            )
+        )
+
+        r = check_scheduled_tasks(
+            "cowork",
+            actual_tasks=[{"taskId": "morning-briefing", "enabled": True}],
+            manifest_path=manifest,
+        )
+        assert r.status == "fail"
+        assert "dream-protocol" in r.message
+
+    def test_warns_on_extra_runtime_tasks(self, tmp_path: Path):
+        manifest = tmp_path / "MANIFEST.md"
+        manifest.write_text(
+            "\n".join(
+                [
+                    "# Bundled Scheduled Tasks",
+                    "",
+                    "| Task | Cron | Skill | Default |",
+                    "|---|---|---|---|",
+                    "| morning-briefing | 30 10 * * * | /secondbrain:morning-brief | on |",
+                ]
+            )
+        )
+
+        r = check_scheduled_tasks(
+            "cowork",
+            actual_tasks=[
+                {"taskId": "morning-briefing", "enabled": True},
+                {"taskId": "email-triage-midday", "enabled": True},
+            ],
+            manifest_path=manifest,
+        )
+        assert r.status == "warning"
+        assert "email-triage-midday" in r.message
+
 
 # ---------------------------------------------------------------------------
 # check_last_dream_protocol_run — Check 13
@@ -1161,3 +1234,50 @@ class TestRunFixableTreatments:
         ]
         step_results = run_fixable_treatments(results, broken_vault, interactive=False)
         assert step_results == []
+
+    def test_orders_write_vault_id_before_add_vault_to_config(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / ".secondbrain-installed").write_text(json.dumps({"steps": []}, indent=2))
+
+        step_result_cls = setup_steps.StepResult
+        called: list[str] = []
+
+        def fake_write_vault_id(vault_path: Path):
+            called.append("write_vault_id")
+            marker = vault_path / ".secondbrain-installed"
+            marker.write_text(json.dumps({"vault_id": "fixed-id", "steps": []}, indent=2))
+            return step_result_cls(success=True, message="vault_id=fixed-id", did_work=True)
+
+        def fake_add_vault_to_config(vault_path: Path, vault_id: str, name: str):
+            del vault_path, name
+            called.append(f"add_vault_to_config:{vault_id}")
+            return step_result_cls(success=True, message="vault registered", did_work=True)
+
+        monkeypatch.setattr(setup_steps, "write_vault_id", fake_write_vault_id, raising=True)
+        monkeypatch.setattr(setup_steps, "add_vault_to_config", fake_add_vault_to_config, raising=True)
+
+        results = [
+            CheckResult(
+                name="vaults_config",
+                status="fail",
+                message="missing",
+                fixable=True,
+                fix_function="add_vault_to_config",
+            ),
+            CheckResult(
+                name="vault_identity_cross",
+                status="fail",
+                message="no vault id",
+                fixable=True,
+                fix_function="write_vault_id",
+            ),
+        ]
+
+        step_results = run_fixable_treatments(results, vault, interactive=False)
+        assert [r.success for r in step_results] == [True, True]
+        assert called == ["write_vault_id", "add_vault_to_config:fixed-id"]

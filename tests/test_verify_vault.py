@@ -222,6 +222,20 @@ class TestBrokenWikilinkChecker:
         assert issue.severity == "error"
         assert "Use: [[entities/stairhopper|Stairhopper Movers]]" in issue.suggestion
 
+    def test_ignores_archive_broken_links_for_health(self, tmp_vault: Path):
+        (tmp_vault / "archive" / "old.md").write_text("See [[entities/missing-archive-link]]\n")
+        index = VaultIndex(tmp_vault)
+        result = BrokenWikilinkChecker().run(index)
+        assert not any(i.file == "archive/old.md" for i in result.issues)
+
+    def test_ignores_legacy_session_log_domain_tags(self, tmp_vault: Path):
+        (tmp_vault / "brain" / "session-log.md").write_text(
+            "# Session Log\n\n**Domains:** [[personal]], [[career]], [[move]]\n"
+        )
+        index = VaultIndex(tmp_vault)
+        result = BrokenWikilinkChecker().run(index)
+        assert not any(i.file == "brain/session-log.md" for i in result.issues)
+
 
 # ---------------------------------------------------------------------------
 # MetadataValidator
@@ -570,6 +584,10 @@ class TestCLI:
     def test_basic_run(self, tmp_vault: Path):
         code = main([str(tmp_vault), "--json"])
         # tmp_vault has correct manifest count issue (10 vs actual), so may return 1
+        assert code in (0, 1)
+
+    def test_basic_run_accepts_vault_flag_alias(self, tmp_vault: Path):
+        code = main(["--vault", str(tmp_vault), "--json"])
         assert code in (0, 1)
 
     def test_specific_checks(self, tmp_vault: Path):

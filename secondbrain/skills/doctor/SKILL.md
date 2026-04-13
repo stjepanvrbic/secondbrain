@@ -3,10 +3,10 @@ name: doctor
 description: >
   This skill should be used when the user asks "what's wrong with my
   secondbrain", "is everything working", "diagnose my setup", "fix my
-  vault", or "secondbrain not working". Runs a read-only diagnostic
-  (Phase 1), reports results, and ONLY on the user's next-turn
-  confirmation invokes the treatment phase (Phase 2) to auto-fix
-  issues. Phase 1 never mutates anything.
+  vault", or "secondbrain not working". Doctor owns environment/bootstrap
+  diagnosis and repair only. It runs a read-only diagnostic (Phase 1),
+  reports results, and ONLY on the user's next-turn confirmation invokes
+  the treatment phase (Phase 2) for bootstrap fixes. Phase 1 never mutates anything.
 metadata:
   version: "3.5.16"
 ---
@@ -40,10 +40,16 @@ Both modes are implemented by the tested Python module
 wrapper `secondbrain/scripts/doctor_cli.py`. Do not re-implement check
 logic in this skill body; always call the CLI.
 
+Doctor does NOT define final vault health. Final vault health belongs to
+`/secondbrain:dream-protocol`. Read
+`@${CLAUDE_PLUGIN_ROOT}/references/healthy-vault.md` before escalating
+vault-state repair.
+
 # Prerequisites
 
 1. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
 2. For environment-specific paths, read `@${CLAUDE_PLUGIN_ROOT}/references/environments.md`.
+3. Read `@${CLAUDE_PLUGIN_ROOT}/references/healthy-vault.md`.
 
 # Phase 1 — Diagnose (Turn 1)
 
@@ -157,12 +163,13 @@ On confirmation:
    succeeded, which failed, and the new diagnostic state.
 4. For any remaining failures after Phase 2, escalate to the user with
    the appropriate manual action from the escalation table above.
-5. If `vault_verification` reported errors, ask the user: "Vault has N
-   errors. Want me to run Dream Protocol to fix them?" On confirmation,
+5. If `vault_verification` reported errors or warnings, ask the user:
+   "Vault has N remaining verification issues. Want me to run Dream Protocol
+   to repair the vault and drive it to a clean verification state?" On confirmation,
    invoke `/secondbrain:dream-protocol`. This is the only check that
    requires a skill invocation rather than a CLI fix — the dream-protocol
-   runs verify_vault.py --fix, archives processed inbox files, fixes
-   wikilinks, and rebuilds the manifest.
+   is the final vault repair path and is responsible for reaching
+   `0 errors, 0 warnings`.
 
 ## What Phase 2 does NOT do
 

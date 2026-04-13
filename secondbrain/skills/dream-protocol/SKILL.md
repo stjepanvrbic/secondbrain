@@ -4,24 +4,32 @@ description: >
   This skill should be used when a "scheduled nightly task" runs at approximately
   2am, when the user asks to "run dream protocol", "run nightly maintenance",
   or "run vault maintenance", or when invoked by init for first-time setup.
-  Performs a reflective consolidation pass over the vault — orienting on current
-  state, gathering recent signal, consolidating changes, and verifying integrity.
+  Orchestrates a semantic worker followed by a structural worker so the vault
+  ends the run in a fully healthy state.
 metadata:
   version: "3.5.16"
 ---
 
 # Core Rule
 
-Nightly reflective pass over the vault. Synthesize recent activity into durable, well-organized vault state so future sessions orient quickly. Runs from scheduled task (~2am) or invoked by init for first-time setup.
+Nightly vault repair orchestrator. Run the two worker skills in sequence:
+
+1. `@${CLAUDE_PLUGIN_ROOT}/skills/dream-protocol-semantic/SKILL.md`
+2. `@${CLAUDE_PLUGIN_ROOT}/skills/dream-protocol-structural/SKILL.md`
+
+This skill is complete only when the structural worker leaves the vault at the
+healthy-vault target: final `verify_vault.py --json` returns `0 errors, 0 warnings`.
 
 # Prerequisites
 
 1. Read `_MANIFEST.md` for current vault state.
+2. Read `@${CLAUDE_PLUGIN_ROOT}/references/healthy-vault.md`.
 2. For vault navigation, read `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
 3. For content templates, read `@${CLAUDE_PLUGIN_ROOT}/references/templates.md`.
 4. For shared write rules (wikilinks, metadata, atomic sections, entity stubs), read `@${CLAUDE_PLUGIN_ROOT}/references/ingestion-rules.md`.
 5. For the named DQL queries used in Phase 2, read `@${CLAUDE_PLUGIN_ROOT}/references/dql-patterns.md`.
 6. For script commands (`verify_vault.py`, `rebuild_manifest.py`, `archive_inbox.py`, `archive_contradiction.py`), read `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`.
+7. Read the worker skill instructions at `@${CLAUDE_PLUGIN_ROOT}/skills/dream-protocol-semantic/SKILL.md` and `@${CLAUDE_PLUGIN_ROOT}/skills/dream-protocol-structural/SKILL.md`.
 
 # Phase 1 — Orient
 
@@ -49,9 +57,12 @@ Use DQL queries to find what needs attention. Don't exhaustively read everything
 - **Entities flagged for verification** — run the `entities-to-verify` query (finds `[verify:: true]` inline markers ingest left behind for ambiguous entity links). Phase 3 resolves or promotes each.
 - **Contradicted content** — vault statements that no longer reflect current reality.
 
-# Phase 3 — Consolidate
+# Phase 3 — Semantic Consolidation
 
-Process everything found in Phase 2. Full details in `references/execution-pipeline.md` (skill-local). Script invocations in `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`.
+Run the semantic worker responsibilities from
+`@${CLAUDE_PLUGIN_ROOT}/skills/dream-protocol-semantic/SKILL.md`.
+Full details remain in `references/execution-pipeline.md` (skill-local).
+Script invocations live in `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`.
 
 - Process inbox items: run `archive_inbox.py` after routing; never mark items processed by hand
 - Route inbox items to vault via ingest routing rules
@@ -73,13 +84,16 @@ Process everything found in Phase 2. Full details in `references/execution-pipel
   - Append to `log.md`: `## [YYYY-MM-DD HH:MM] dream-protocol | contradiction-resolved | <subject>` with a one-line body pointing at both the live file and the archived copy.
   - No hard deletes. The archived content remains recoverable.
 
-# Phase 4 — Verify & Index
+# Phase 4 — Structural Maintenance
 
+Run the structural worker responsibilities from
+`@${CLAUDE_PLUGIN_ROOT}/skills/dream-protocol-structural/SKILL.md`.
 Script invocations live in `@${CLAUDE_PLUGIN_ROOT}/references/script-invocations.md`.
 
 - Run the full-scan `verify_vault.py --json` to get the issue report.
 - Run `verify_vault.py --fix` for auto-fixable issues.
-- Fix remaining issues, re-verify until clean (see `references/execution-pipeline.md` for issue-type handling).
+- Fix remaining issues, re-verify until clean.
+- "Clean" means the final verifier returns `0 errors, 0 warnings`.
 - Run `rebuild_manifest.py` to regenerate `_MANIFEST.md`. The rebuild:
   - **Regenerates the Content Catalog** by walking all `.md` files outside `inbox/`, `archive/`, `scratch/`, extracting the first non-frontmatter heading and any leading `> ...` blockquote summary, grouped by parent folder (entities, projects, concepts, reference).
   - **Rebuilds the Recent Activity section** from the last 7 days of `log.md` entries.
@@ -123,7 +137,8 @@ based on the now-clean vault state:
 
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/update_hot_memory.py \
-    --regenerate --vault "${VAULT_PATH}"
+    --regenerate --vault "${VAULT_PATH}" \
+    --desktop-config-path "${SECONDBRAIN_CLAUDE_DESKTOP_CONFIG:-$HOME/Library/Application Support/Claude/claude_desktop_config.json}"
 ```
 
 The script reads vault state via Connect MCP, builds the hot-memory
@@ -158,6 +173,7 @@ to.
 # Output
 
 Brief summary of what was consolidated, updated, or pruned. If nothing changed, say so.
+Do not claim success unless the final health target was reached.
 
 ```
 dream-protocol completed: [ISO timestamp]

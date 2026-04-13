@@ -809,7 +809,58 @@ def check_standard_folders(vault_path: Path) -> CheckResult:
     )
 
 
-def check_scheduled_tasks(env: str) -> CheckResult:
+_SCHEDULED_TASK_ROW_RE = re.compile(r"^\|\s*([^|]+?)\s*\|")
+
+
+def _load_manifest_task_ids(manifest_path: Path) -> List[str]:
+    """Read scheduled-task IDs from MANIFEST.md."""
+    task_ids: List[str] = []
+    try:
+        lines = manifest_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return task_ids
+
+    for line in lines:
+        if not line.startswith("|"):
+            continue
+        if "Task | Cron | Skill | Default" in line or set(line.replace("|", "").strip()) == {"-"}:
+            continue
+        m = _SCHEDULED_TASK_ROW_RE.match(line)
+        if not m:
+            continue
+        task_id = m.group(1).strip()
+        if task_id:
+            task_ids.append(task_id)
+    return task_ids
+
+
+def _normalize_actual_scheduled_tasks(actual_tasks: List[Any]) -> tuple[Dict[str, bool], List[str]]:
+    """Normalize runtime scheduled-task inventory into task_id -> enabled."""
+    normalized: Dict[str, bool] = {}
+    extras: List[str] = []
+
+    for task in actual_tasks:
+        if isinstance(task, str):
+            normalized[task] = True
+            continue
+        if not isinstance(task, dict):
+            extras.append(repr(task))
+            continue
+        task_id = task.get("taskId")
+        if not isinstance(task_id, str) or not task_id:
+            extras.append(repr(task))
+            continue
+        enabled = task.get("enabled", True)
+        normalized[task_id] = bool(enabled)
+
+    return normalized, extras
+
+
+def check_scheduled_tasks(
+    env: str,
+    actual_tasks: Optional[List[Any]] = None,
+    manifest_path: Optional[Path] = None,
+) -> CheckResult:
     """Check 12: bundled scheduled tasks are registered.
 
     This is intentionally best-effort. In Code, we'd want to call
@@ -821,28 +872,101 @@ def check_scheduled_tasks(env: str) -> CheckResult:
     In Cowork, the authoritative verification lives in the surrounding
     session layer via the scheduled-tasks tool, not in a filesystem probe.
     """
-    if env == "code":
+    if actual_tasks is None:
+        if env == "code":
+            return CheckResult(
+                name="scheduled_tasks",
+                status="warning",
+                message=(
+                    "scheduled-task registration must be verified via CronList "
+                    "from the agent session — doctor's Python subprocess cannot "
+                    "call it directly. The skill body does this check separately."
+                ),
+                fixable=False,
+            )
+
+        # Cowork: try to locate the workspace root. In the absence of a clear
+        # contract, degrade to a warning.
         return CheckResult(
             name="scheduled_tasks",
             status="warning",
             message=(
-                "scheduled-task registration must be verified via CronList "
-                "from the agent session — doctor's Python subprocess cannot "
-                "call it directly. The skill body does this check separately."
+                "scheduled-task presence in Cowork must be verified from the session layer "
+                "via the scheduled-tasks tool — doctor cannot definitively check this from a subprocess."
             ),
             fixable=False,
         )
 
-    # Cowork: try to locate the workspace root. In the absence of a clear
-    # contract, degrade to a warning.
+    resolved_manifest = manifest_path
+    if resolved_manifest is None:
+        plugin_root = _resolve_plugin_root()
+        if plugin_root is not None:
+            candidate = plugin_root / "scheduled-tasks" / "MANIFEST.md"
+            if candidate.is_file():
+                resolved_manifest = candidate
+
+    if resolved_manifest is None or not resolved_manifest.is_file():
+        return CheckResult(
+            name="scheduled_tasks",
+            status="fail",
+            message="scheduled-tasks MANIFEST.md missing — cannot validate runtime inventory",
+            fixable=False,
+        )
+
+    manifest_task_ids = _load_manifest_task_ids(resolved_manifest)
+    if not manifest_task_ids:
+        return CheckResult(
+            name="scheduled_tasks",
+            status="fail",
+            message=f"{resolved_manifest} has no task rows — scheduled-task contract is undefined",
+            fixable=False,
+        )
+
+    actual_by_id, malformed = _normalize_actual_scheduled_tasks(actual_tasks)
+    missing = [task_id for task_id in manifest_task_ids if task_id not in actual_by_id]
+    disabled = [task_id for task_id in manifest_task_ids if task_id in actual_by_id and not actual_by_id[task_id]]
+    extras = sorted(task_id for task_id in actual_by_id if task_id not in manifest_task_ids)
+    issues: List[str] = []
+    if missing:
+        issues.append("missing: " + ", ".join(missing))
+    if disabled:
+        issues.append("disabled: " + ", ".join(disabled))
+    if malformed:
+        issues.append("malformed entries: " + ", ".join(malformed))
+    if issues:
+        return CheckResult(
+            name="scheduled_tasks",
+            status="fail",
+            message="scheduled-task contract mismatch — " + "; ".join(issues),
+            fixable=False,
+            details={
+                "manifest_tasks": manifest_task_ids,
+                "missing": missing,
+                "disabled": disabled,
+                "malformed": malformed,
+            },
+        )
+    if extras:
+        return CheckResult(
+            name="scheduled_tasks",
+            status="warning",
+            message=(
+                "manifest tasks present and enabled, but runtime has extra scheduled tasks: "
+                + ", ".join(extras)
+            ),
+            fixable=False,
+            details={"manifest_tasks": manifest_task_ids, "extras": extras},
+        )
+
     return CheckResult(
         name="scheduled_tasks",
-        status="warning",
+        status="pass",
         message=(
-            "scheduled-task presence in Cowork must be verified from the session layer "
-            "via the scheduled-tasks tool — doctor cannot definitively check this from a subprocess."
+            f"{len(manifest_task_ids)} manifest scheduled tasks present and enabled: "
+            + ", ".join(manifest_task_ids)
         ),
         fixable=False,
+        details={"manifest_tasks": manifest_task_ids},
     )
 
 
@@ -1674,13 +1798,22 @@ def run_fixable_treatments(
     """
     import setup_steps  # type: ignore[reportMissingImports]
 
-    step_results: List[Any] = []
-    for result in results:
-        if result.status != "fail":
-            continue
-        if not result.fixable or not result.fix_function:
-            continue
+    fix_priority = {
+        "write_vault_id": 0,
+        "add_vault_to_config": 1,
+        "create_hot_memory_initial": 2,
+    }
+    pending_results = sorted(
+        (
+            result
+            for result in results
+            if result.status == "fail" and result.fixable and result.fix_function
+        ),
+        key=lambda result: (fix_priority.get(result.fix_function or "", 100), result.name),
+    )
 
+    step_results: List[Any] = []
+    for result in pending_results:
         fix_fn = getattr(setup_steps, result.fix_function, None)
         if fix_fn is None:
             # Missing implementation — surface the mismatch but don't crash.
