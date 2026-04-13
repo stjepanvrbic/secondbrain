@@ -1,26 +1,25 @@
-"""Tests for the T13 extension of on-stop.sh — ingester subagent dispatch.
+"""Tests for the lifecycle batching behavior of on-stop.sh.
 
-T9 established the Stop hook's commit-only behavior (see test_on_stop_hook_commit.py).
-T13 extends the hook with the ingester dispatch path:
+T9 established the Stop hook's commit-only behavior
+(see test_on_stop_hook_commit.py). The current lifecycle contract layers
+batched ingest dispatch on top:
 
-    1. Run extract_new_turns.py to build a /tmp envelope
-    2. If new_turns count > 0, dispatch the secondbrain-ingester subagent
-       via `nohup claude --agent secondbrain-ingester -p ... & disown`
+    1. Run extract_new_turns.py to build a UNIQUE envelope per dispatch
+    2. Dispatch only once there are 5 completed exchanges since the cursor
     3. Always exit 0 — dispatch failures never wedge the session
 
 Tests here are additive; test_on_stop_hook_commit.py still guards the T9
-behavior. This file covers the T13-specific surface area:
+behavior. This file covers the batching/dispatch surface area:
 
-    - extract_new_turns.py is invoked with the right arguments.
-    - The hook skips dispatch (but still commits) when there are zero
-      new turns.
+    - extract_new_turns.py leaves behind a unique envelope the runner can read.
+    - The hook skips dispatch (but still commits) when there are fewer than
+      5 completed exchanges.
     - The hook skips dispatch (but still commits) when
       SECONDBRAIN_SKIP_INGESTER_DISPATCH=1.
     - The hook skips dispatch (but still commits) when the `claude` CLI
       is not on PATH — we can't depend on the real CLI in tests, so we
       need graceful degradation.
-    - When all gates pass, the hook writes a "dispatched ingester" line
-      to ingest-log.md.
+    - When all gates pass, the hook writes a dispatch line to ingest-log.md.
 
 Strategy: same as test_on_stop_hook_commit.py — subprocess-invoke the real
 hook script with isolated PATH/env, dropping a stub `claude` binary into
@@ -36,6 +35,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Iterator, Tuple
 
@@ -179,6 +179,35 @@ def _make_stub_claude(bin_dir: Path, log_file: Path) -> None:
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def _logged_json_paths(log_file: Path) -> list[Path]:
+    if not log_file.exists():
+        return []
+    out: list[Path] = []
+    for token in log_file.read_text().split():
+        token = token.rstrip(".'\"")
+        if token.startswith("/") and token.endswith(".json"):
+            out.append(Path(token))
+    return out
+
+
+def _wait_for_logged_json_paths(log_file: Path, timeout_s: float = 1.0) -> list[Path]:
+    deadline = time.time() + timeout_s
+    paths = _logged_json_paths(log_file)
+    while not paths and time.time() < deadline:
+        time.sleep(0.05)
+        paths = _logged_json_paths(log_file)
+    return paths
+
+
+def _wait_for_logged_json_count(log_file: Path, expected: int, timeout_s: float = 1.0) -> list[Path]:
+    deadline = time.time() + timeout_s
+    paths = _logged_json_paths(log_file)
+    while len(paths) < expected and time.time() < deadline:
+        time.sleep(0.05)
+        paths = _logged_json_paths(log_file)
+    return paths
+
+
 def _run_hook(
     payload: dict,
     scratch: Path,
@@ -229,8 +258,8 @@ def _ingest_log(vault: Path) -> str:
 
 
 class TestExtractNewTurnsIsCalled:
-    """When a transcript exists with new turns, the hook must run
-    extract_new_turns.py and leave an envelope behind."""
+    """When Stop reaches the batching threshold, it must write a unique
+    envelope for the detached ingester runner."""
 
     def test_envelope_gets_written_for_session(self, scratch: Path):
         vault = _make_vault_in_scratch(scratch)
@@ -238,7 +267,7 @@ class TestExtractNewTurnsIsCalled:
         (vault / "brain" / "new.md").write_text("# new turn\n")
 
         transcript = scratch / "tx.jsonl"
-        _write_transcript(transcript, turn_count=3)
+        _write_transcript(transcript, turn_count=5)
 
         config = scratch / "cfg" / "vaults.json"
         _write_vaults_config(
@@ -265,38 +294,81 @@ class TestExtractNewTurnsIsCalled:
         )
         assert code == 0
 
-        # The envelope file should exist after the hook ran. The hook
-        # uses /tmp/secondbrain-stop-context-<session>.json by convention.
-        envelope_path = Path(f"/tmp/secondbrain-stop-context-{session_id}.json")
-        try:
-            assert envelope_path.is_file(), (
-                f"expected envelope at {envelope_path} after the hook ran; "
-                f"nothing was found. ingest-log:\n{_ingest_log(vault)}"
+        envelope_paths = _wait_for_logged_json_paths(claude_log)
+        assert envelope_paths, (
+            "batched stop path must hand a JSON envelope path to the ingester; "
+            f"stub log was: {claude_log.read_text() if claude_log.exists() else '<absent>'}"
+        )
+        envelope_path = envelope_paths[-1]
+        assert envelope_path.is_file(), (
+            f"expected envelope at {envelope_path} after the hook ran; "
+            f"nothing was found. ingest-log:\n{_ingest_log(vault)}"
+        )
+        assert envelope_path != Path(f"/tmp/secondbrain-stop-context-{session_id}.json"), (
+            "envelope path must no longer be the old fixed /tmp path; "
+            "it must be unique per dispatch to avoid collisions"
+        )
+        assert "envelopes" in envelope_path.parts, (
+            f"expected unique envelope under an envelopes/ runtime dir, got {envelope_path}"
+        )
+        envelope = json.loads(envelope_path.read_text())
+        assert "new_turns" in envelope
+        assert envelope.get("session_id") == session_id
+
+    def test_same_session_gets_distinct_envelope_paths_on_separate_dispatches(self, scratch: Path):
+        vault = _make_vault_in_scratch(scratch)
+        _init_vault_as_git_repo(vault)
+        config = scratch / "cfg" / "vaults.json"
+        _write_vaults_config(config, [_make_vault_entry(vault)], active_id="v1")
+
+        bin_dir = scratch / "bin"
+        claude_log = scratch / "claude_calls.log"
+        _make_stub_claude(bin_dir, claude_log)
+
+        transcript = scratch / "tx.jsonl"
+        session_id = "same-session"
+
+        for idx, marker in enumerate(("first", "second"), start=1):
+            (vault / "brain" / f"{marker}.md").write_text(f"# {marker}\n")
+            _write_transcript(transcript, turn_count=5)
+            payload = {
+                "session_id": session_id,
+                "transcript_path": str(transcript),
+                "cwd": str(vault),
+                "stop_hook_active": False,
+            }
+            code, _, _ = _run_hook(
+                payload,
+                scratch,
+                vaults_config=config,
+                path_with_claude=bin_dir,
             )
-            envelope = json.loads(envelope_path.read_text())
-            assert "new_turns" in envelope
-            assert envelope.get("session_id") == session_id
-        finally:
-            if envelope_path.exists():
-                envelope_path.unlink()
+            assert code == 0
+            _wait_for_logged_json_count(claude_log, idx)
+
+        envelope_paths = _wait_for_logged_json_paths(claude_log)
+        assert len(envelope_paths) >= 2, (
+            "expected two dispatched envelope paths across two stop runs; "
+            f"stub log was: {claude_log.read_text() if claude_log.exists() else '<absent>'}"
+        )
+        assert envelope_paths[-1] != envelope_paths[-2], (
+            "separate dispatches for the same session must not reuse one fixed envelope path"
+        )
 
 
 class TestDispatchGatedByNewTurnCount:
-    """When the transcript is empty (no new turns), the hook must still
-    commit but must NOT dispatch the ingester. Otherwise we'd spawn a
-    background subprocess for every clean turn, which is both wasteful
-    and hard to debug in the ingest-log."""
+    """Stop batches on completed exchanges. Fewer than 5 assistant turns
+    since the cursor must not dispatch yet."""
 
-    def test_no_new_turns_no_dispatch(self, scratch: Path):
+    def test_four_completed_exchanges_no_dispatch(self, scratch: Path):
         vault = _make_vault_in_scratch(scratch)
         _init_vault_as_git_repo(vault)
         # Dirty change so the commit path fires — we want to prove that
-        # T9 behavior still runs even when T13's dispatch gets skipped.
+        # T9 behavior still runs even when the batched dispatch gets skipped.
         (vault / "brain" / "new.md").write_text("# dirty\n")
 
-        # Empty transcript → zero new turns.
-        transcript = scratch / "empty.jsonl"
-        transcript.write_text("")
+        transcript = scratch / "tx.jsonl"
+        _write_transcript(transcript, turn_count=4)
 
         config = scratch / "cfg" / "vaults.json"
         _write_vaults_config(
@@ -325,19 +397,13 @@ class TestDispatchGatedByNewTurnCount:
         # Commit still happened (T9 behavior preserved).
         cp = _git("rev-list", "--count", "HEAD", cwd=vault)
         assert int(cp.stdout.strip()) >= 2, (
-            "T9 commit must still happen even when T13 dispatch is skipped"
+            "T9 commit must still happen even when the batched dispatch is skipped"
         )
 
-        # But the stub `claude` should NOT have been called.
-        envelope_path = Path(f"/tmp/secondbrain-stop-context-{session_id}.json")
-        try:
-            assert not claude_log.exists() or claude_log.read_text() == "", (
-                "no-new-turns case must NOT invoke `claude`; "
-                f"stub log: {claude_log.read_text() if claude_log.exists() else '<absent>'}"
-            )
-        finally:
-            if envelope_path.exists():
-                envelope_path.unlink()
+        assert not claude_log.exists() or claude_log.read_text() == "", (
+            "sub-threshold stop case must NOT invoke `claude`; "
+            f"stub log: {claude_log.read_text() if claude_log.exists() else '<absent>'}"
+        )
 
 
 class TestSkipDispatchEnvVar:
@@ -353,7 +419,7 @@ class TestSkipDispatchEnvVar:
         (vault / "brain" / "new.md").write_text("# dirty\n")
 
         transcript = scratch / "tx.jsonl"
-        _write_transcript(transcript, turn_count=3)
+        _write_transcript(transcript, turn_count=5)
 
         config = scratch / "cfg" / "vaults.json"
         _write_vaults_config(
@@ -380,17 +446,12 @@ class TestSkipDispatchEnvVar:
         )
         assert code == 0
 
-        # Even though there were new turns AND claude was on PATH, the
-        # dispatch was gated off by the env var.
-        envelope_path = Path(f"/tmp/secondbrain-stop-context-{session_id}.json")
-        try:
-            assert not claude_log.exists() or claude_log.read_text() == "", (
-                "SECONDBRAIN_SKIP_INGESTER_DISPATCH=1 must suppress the "
-                "ingester dispatch; the stub `claude` was called anyway"
-            )
-        finally:
-            if envelope_path.exists():
-                envelope_path.unlink()
+        # Even though there were enough completed exchanges AND claude was
+        # on PATH, the dispatch was gated off by the env var.
+        assert not claude_log.exists() or claude_log.read_text() == "", (
+            "SECONDBRAIN_SKIP_INGESTER_DISPATCH=1 must suppress the "
+            "ingester dispatch; the stub `claude` was called anyway"
+        )
 
 
 class TestClaudeCliMissingOnPath:
@@ -404,7 +465,7 @@ class TestClaudeCliMissingOnPath:
         (vault / "brain" / "new.md").write_text("# dirty\n")
 
         transcript = scratch / "tx.jsonl"
-        _write_transcript(transcript, turn_count=3)
+        _write_transcript(transcript, turn_count=5)
 
         config = scratch / "cfg" / "vaults.json"
         _write_vaults_config(
@@ -427,16 +488,11 @@ class TestClaudeCliMissingOnPath:
         )
         assert code == 0
 
-        envelope_path = Path(f"/tmp/secondbrain-stop-context-{session_id}.json")
-        try:
-            # The log should still exist (extract still ran + commit still
-            # logged), but no dispatch line should claim we succeeded in
-            # firing `claude`.
-            log_text = _ingest_log(vault)
-            assert log_text, "ingest-log.md should have T9 commit entry"
-        finally:
-            if envelope_path.exists():
-                envelope_path.unlink()
+        # The log should still exist (extract still ran + commit still
+        # logged), but no dispatch line should claim we succeeded in
+        # firing `claude`.
+        log_text = _ingest_log(vault)
+        assert log_text, "ingest-log.md should have T9 commit entry"
 
 
 class TestDispatchLoggedOnSuccess:
@@ -476,13 +532,8 @@ class TestDispatchLoggedOnSuccess:
         )
         assert code == 0
 
-        envelope_path = Path(f"/tmp/secondbrain-stop-context-{session_id}.json")
-        try:
-            log = _ingest_log(vault)
-            # Look for something that says we dispatched — prose can vary.
-            assert "dispatch" in log.lower() or "ingester" in log.lower(), (
-                f"expected dispatch line in ingest-log; got:\n{log}"
-            )
-        finally:
-            if envelope_path.exists():
-                envelope_path.unlink()
+        log = _ingest_log(vault)
+        # Look for something that says we dispatched — prose can vary.
+        assert "dispatch" in log.lower() or "ingester" in log.lower(), (
+            f"expected dispatch line in ingest-log; got:\n{log}"
+        )

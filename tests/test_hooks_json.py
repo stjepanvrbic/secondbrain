@@ -37,7 +37,14 @@ class TestTopLevelShape:
 
     def test_required_event_keys(self):
         data = _load()
-        for key in ("SessionStart", "SessionEnd", "PreToolUse", "PostToolUse", "Stop"):
+        for key in (
+            "SessionStart",
+            "SessionEnd",
+            "Notification",
+            "PreToolUse",
+            "PostToolUse",
+            "Stop",
+        ):
             assert key in data["hooks"], f"hooks.json missing required event: {key}"
 
 
@@ -147,6 +154,33 @@ class TestStopMatcher:
         matchers = [entry.get("matcher") for entry in data["hooks"]["Stop"]]
         assert any(m == "" for m in matchers), (
             f"Stop should have an empty-string matcher to match all stops; got {matchers!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Notification — idle_prompt flushes leftover turns between stop batches.
+# ---------------------------------------------------------------------------
+
+class TestNotificationMatcher:
+    def test_notification_matcher_exists(self):
+        data = _load()
+        assert "Notification" in data["hooks"], "hooks.json missing Notification event"
+        assert data["hooks"]["Notification"], "Notification event has no entries"
+
+    def test_notification_matcher_points_at_on_notification_sh(self):
+        data = _load()
+        found = False
+        for entry in data["hooks"]["Notification"]:
+            for hook in entry.get("hooks", []):
+                if "on-notification.sh" in hook.get("command", ""):
+                    found = True
+        assert found, "Notification matcher must wire on-notification.sh"
+
+    def test_notification_matcher_targets_idle_prompt(self):
+        data = _load()
+        matchers = [entry.get("matcher") for entry in data["hooks"]["Notification"]]
+        assert any(m == "idle_prompt" for m in matchers), (
+            f"Notification must target idle_prompt, got {matchers!r}"
         )
 
 

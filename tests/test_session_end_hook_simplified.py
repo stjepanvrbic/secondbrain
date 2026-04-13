@@ -1,13 +1,12 @@
-"""Tests for the T13 simplification of session-end.sh.
+"""Tests for the lightweight session-end fallback hook.
 
 Before T13, session-end.sh emitted a `systemMessage` telling the agent to
 run `/secondbrain:session-end`. That skill flushed session summary to the
 vault.
 
-T13 moves the flush discipline into per-turn Stop hook commits (T9) and
-the background ingester (this task). The SessionEnd hook's only remaining
-job is an audit entry in ingest-log.md and a best-effort verify_vault.py
-run.
+The steady-state lifecycle path is Stop batching + idle Notification
+flushes. SessionEnd is now just a lightweight audit entry plus a final
+best-effort ingest flush if there are leftover turns.
 
 What this file locks down:
 
@@ -15,10 +14,11 @@ What this file locks down:
        discipline is dead).
     2. session-end.sh appends a timestamped session-end line to
        ingest-log.md.
-    3. session-end.sh invokes verify_vault.py if the script is present.
-    4. session-end.sh handles a missing active vault gracefully (no crash,
+    3. session-end.sh does NOT run verify_vault.py inline anymore.
+    4. session-end.sh can flush leftover turns via the ingester runner.
+    5. session-end.sh handles a missing active vault gracefully (no crash,
        exit 0).
-    5. session-end.sh handles malformed stdin gracefully.
+    6. session-end.sh handles malformed stdin gracefully.
 
 Strategy: subprocess-invoke the real hook, same as test_on_stop_hook_commit.py.
 """
@@ -28,8 +28,10 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Iterator, Tuple
 
@@ -82,12 +84,75 @@ def _make_vault(scratch: Path, name: str = "vault") -> Path:
     return vault
 
 
+def _write_transcript(transcript_path: Path, turn_count: int) -> None:
+    transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for i in range(turn_count):
+        lines.append(
+            json.dumps(
+                {
+                    "type": "user",
+                    "uuid": f"u-{i}",
+                    "timestamp": f"2026-04-11T12:{i:02d}:00",
+                    "message": {"role": "user", "content": f"user message {i}"},
+                }
+            )
+        )
+        lines.append(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "uuid": f"a-{i}",
+                    "timestamp": f"2026-04-11T12:{i:02d}:30",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": f"assistant response {i}"}],
+                    },
+                }
+            )
+        )
+    transcript_path.write_text("\n".join(lines) + "\n")
+
+
+def _make_stub_claude(bin_dir: Path, log_file: Path) -> None:
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    stub = bin_dir / "claude"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo "$@" >> "{log_file}"\n'
+        "exit 0\n"
+    )
+    stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def _logged_json_paths(log_file: Path) -> list[Path]:
+    if not log_file.exists():
+        return []
+    out: list[Path] = []
+    for token in log_file.read_text().split():
+        token = token.rstrip(".'\"")
+        if token.startswith("/") and token.endswith(".json"):
+            out.append(Path(token))
+    return out
+
+
+def _wait_for_logged_json_paths(log_file: Path, timeout_s: float = 1.0) -> list[Path]:
+    deadline = time.time() + timeout_s
+    paths = _logged_json_paths(log_file)
+    while not paths and time.time() < deadline:
+        time.sleep(0.05)
+        paths = _logged_json_paths(log_file)
+    return paths
+
+
 def _run_hook(
     payload: dict | None,
     scratch: Path,
     *,
     vaults_config: Path | None = None,
     raw_input: str | None = None,
+    path_with_claude: Path | None = None,
+    extra_env: dict | None = None,
 ) -> Tuple[int, str, str]:
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
@@ -95,6 +160,12 @@ def _run_hook(
         env["SECONDBRAIN_VAULTS_CONFIG"] = str(vaults_config)
     else:
         env["SECONDBRAIN_VAULTS_CONFIG"] = str(scratch / "no-config.json")
+    if path_with_claude is not None:
+        env["PATH"] = f"{path_with_claude}:/usr/bin:/bin"
+    else:
+        env["PATH"] = "/usr/bin:/bin"
+    if extra_env:
+        env.update(extra_env)
 
     stdin_text = raw_input if raw_input is not None else json.dumps(payload or {})
     result = subprocess.run(
@@ -247,14 +318,10 @@ class TestMalformedStdinGraceful:
         assert code == 0
 
 
-class TestVerifyVaultBestEffort:
-    """When verify_vault.py is present, the hook should invoke it (best
-    effort). If it's missing or fails, the hook still exits 0 — audit is
-    primary, verification is a secondary signal."""
+class TestNoInlineVerify:
+    """SessionEnd must stay cheap. Inline vault verification was removed."""
 
-    def test_verify_vault_output_captured_when_present(self, scratch: Path):
-        """Happy path — invoke the real verify_vault.py. The hook should
-        run to completion regardless of the verify outcome."""
+    def test_session_end_log_does_not_capture_verify_vault_output(self, scratch: Path):
         vault = _make_vault(scratch)
         config = scratch / "cfg" / "vaults.json"
         _write_vaults_config(config, [_make_vault_entry(vault)], active_id="v1")
@@ -262,4 +329,69 @@ class TestVerifyVaultBestEffort:
         code, _, _ = _run_hook(payload, scratch, vaults_config=config)
         assert code == 0
         log = _ingest_log(vault)
-        assert log, "hook must still log even if verify_vault.py runs"
+        assert "verify_vault.py" not in log
+        assert '"errors"' not in log
+        assert '"warnings"' not in log
+
+
+class TestFallbackDispatch:
+    """If leftover turns still exist at SessionEnd, the hook should flush
+    them once via the same ingester path used by Stop/Notification."""
+
+    def test_session_end_dispatches_leftover_turns(self, scratch: Path):
+        vault = _make_vault(scratch)
+        (vault / ".secondbrain-installed").write_text(json.dumps({"vault_id": "v1"}))
+        transcript = scratch / "tx.jsonl"
+        _write_transcript(transcript, turn_count=2)
+
+        config = scratch / "cfg" / "vaults.json"
+        _write_vaults_config(config, [_make_vault_entry(vault)], active_id="v1")
+
+        bin_dir = scratch / "bin"
+        claude_log = scratch / "claude_calls.log"
+        _make_stub_claude(bin_dir, claude_log)
+
+        payload = {
+            "session_id": "session-end-fallback",
+            "transcript_path": str(transcript),
+            "cwd": str(vault),
+        }
+        code, _, _ = _run_hook(
+            payload,
+            scratch,
+            vaults_config=config,
+            path_with_claude=bin_dir,
+        )
+        assert code == 0
+        envelope_paths = _wait_for_logged_json_paths(claude_log)
+        assert envelope_paths, "session-end fallback should dispatch leftover turns"
+        assert envelope_paths[-1].is_file()
+
+    def test_session_end_skips_dispatch_when_nothing_is_pending(self, scratch: Path):
+        vault = _make_vault(scratch)
+        (vault / ".secondbrain-installed").write_text(json.dumps({"vault_id": "v1"}))
+        transcript = scratch / "tx.jsonl"
+        transcript.write_text("")
+
+        config = scratch / "cfg" / "vaults.json"
+        _write_vaults_config(config, [_make_vault_entry(vault)], active_id="v1")
+
+        bin_dir = scratch / "bin"
+        claude_log = scratch / "claude_calls.log"
+        _make_stub_claude(bin_dir, claude_log)
+
+        payload = {
+            "session_id": "session-end-empty",
+            "transcript_path": str(transcript),
+            "cwd": str(vault),
+        }
+        code, _, _ = _run_hook(
+            payload,
+            scratch,
+            vaults_config=config,
+            path_with_claude=bin_dir,
+        )
+        assert code == 0
+        assert not claude_log.exists() or claude_log.read_text() == "", (
+            "session-end must not dispatch when nothing is pending"
+        )
