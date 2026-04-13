@@ -111,6 +111,19 @@ class TestWikilinkResolution:
         index = VaultIndex(tmp_vault)
         assert resolve_wikilink("", index) is None
 
+    def test_domain_name_falls_back_to_domain_index(self, tmp_vault: Path):
+        (tmp_vault / "career").mkdir()
+        (tmp_vault / "career" / "career-index.md").write_text("# Career\n")
+        index = VaultIndex(tmp_vault)
+        result = resolve_wikilink("career", index)
+        assert result == tmp_vault / "career" / "career-index.md"
+
+    def test_display_name_falls_back_to_entity_slug(self, tmp_vault: Path):
+        (tmp_vault / "entities" / "prime-trading.md").write_text("# Prime Trading\n")
+        index = VaultIndex(tmp_vault)
+        result = resolve_wikilink("Prime Trading", index)
+        assert result == tmp_vault / "entities" / "prime-trading.md"
+
 
 # ---------------------------------------------------------------------------
 # VaultIndex

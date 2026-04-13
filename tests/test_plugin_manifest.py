@@ -241,15 +241,14 @@ class TestVersionConsistency:
                 ["git", "-C", str(REPO_ROOT), "describe", "--tags", "--abbrev=0"],
                 capture_output=True, text=True, check=True,
             ).stdout.strip()
-        except subprocess.CalledProcessError:
-            pytest.skip("no git tags yet")
-        if not last_tag:
-            pytest.skip("no git tags yet")
+        except subprocess.CalledProcessError as exc:
+            raise AssertionError("repo must have at least one release tag") from exc
+        assert last_tag, "repo must have at least one release tag"
         tag_clean = last_tag.lstrip("v")
         try:
             tag_version = parse_semver(tag_clean)
-        except (ValueError, IndexError):
-            pytest.skip(f"last tag {last_tag!r} isn't semver")
+        except (ValueError, IndexError) as exc:
+            raise AssertionError(f"last tag {last_tag!r} must be semver") from exc
         assert current > tag_version, (
             f"plugin.json version {current_str} has no matching tag and is not "
             f"strictly greater than last tag {last_tag} — "

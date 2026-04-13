@@ -12,11 +12,11 @@ T5 turns doctor into a two-turn "diagnose-then-treat" flow:
   `setup_steps` fix functions and re-run the diagnostic.
 
 This module owns the check logic. Each `check_*` function returns a
-`CheckResult` (pass/fail/skip/warning + fix hint). `run_all_checks`
-orchestrates the full suite and enforces dependency order — e.g. the
-vault-side checks are skipped if the MCP connection failed, so the
-report doesn't mislead with "_MANIFEST.md missing" when the real root
-cause is "Obsidian isn't running".
+`CheckResult` (pass/fail/warning + fix hint). `run_all_checks`
+orchestrates the full suite and enforces dependency order while still
+failing loudly on broken prerequisites, so the report doesn't mislead
+with "_MANIFEST.md missing" when the real root cause is "Obsidian isn't
+running".
 
 `run_fixable_treatments` is the Phase 2 dispatcher. It iterates the
 check results, finds the ones with `fixable=True`, and invokes the
@@ -76,9 +76,6 @@ class CheckResult:
       - "pass": everything is fine, nothing to do.
       - "fail": a problem that requires action.
       - "warning": degraded but not broken (e.g. recent ingest failures).
-      - "skip": the check could not run (usually because an upstream
-                check failed and downstream is meaningless without it).
-
     `fixable` is a hint to Phase 2 — if True, doctor can invoke the
     named `fix_function` in `setup_steps` to resolve it. If False, the
     user must take manual action (documented in the check message).
@@ -96,10 +93,152 @@ class CheckResult:
 # inputs it needs. They never `print()`; logging is the caller's job.
 # ---------------------------------------------------------------------------
 
-def check_plugin_root() -> CheckResult:
-    """Check 1: CLAUDE_PLUGIN_ROOT is set and points at a real directory."""
-    root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
-    if not root:
+def _normalize_plugin_root(candidate: Path) -> Optional[Path]:
+    """Return the runtime plugin root for a candidate path, if recognizable."""
+    if not candidate:
+        return None
+
+    candidates = [candidate]
+    if candidate.name == "scripts":
+        candidates.insert(0, candidate.parent)
+    candidates.append(candidate / "secondbrain")
+
+    for path in candidates:
+        if path.is_dir() and (path / ".claude-plugin").is_dir() and (path / "scripts").is_dir():
+            return path.resolve()
+
+    return candidate.resolve() if candidate.is_dir() else None
+
+
+def _resolve_plugin_root(candidate: Optional[Path] = None) -> Optional[Path]:
+    """Resolve the plugin root from explicit input, env, or the current runtime."""
+    for raw in (
+        candidate,
+        Path(os.environ["CLAUDE_PLUGIN_ROOT"]) if os.environ.get("CLAUDE_PLUGIN_ROOT") else None,
+        _SCRIPTS_DIR,
+    ):
+        if raw is None:
+            continue
+        resolved = _normalize_plugin_root(Path(raw))
+        if resolved is not None:
+            return resolved
+    return None
+
+
+def _detect_environment() -> str:
+    """Return `code` or `cowork`, defaulting to the safer Cowork mode."""
+    try:
+        import setup_steps  # type: ignore[reportMissingImports]
+        return setup_steps.detect_environment()
+    except Exception:
+        return "cowork"
+
+
+def _default_cowork_desktop_config_path() -> Path:
+    """Return the Claude Desktop config path for the current platform."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+    if sys.platform.startswith("win"):
+        return Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
+    return Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+
+
+def _load_cowork_obsidian_server(
+    desktop_config_path: Optional[Path] = None,
+) -> Optional[Dict[str, Any]]:
+    """Read the Cowork desktop config and return the obsidian MCP server entry."""
+    config_path = desktop_config_path or _default_cowork_desktop_config_path()
+    if not config_path.is_file():
+        return None
+    try:
+        data = json.loads(config_path.read_text())
+    except Exception:
+        return None
+
+    server = data.get("mcpServers", {}).get("obsidian")
+    return server if isinstance(server, dict) else None
+
+
+def _cowork_obsidian_api_key(desktop_config_path: Optional[Path] = None) -> Optional[str]:
+    """Extract the Cowork obsidian MCP bearer token from desktop config."""
+    server = _load_cowork_obsidian_server(desktop_config_path)
+    if server is None:
+        return None
+
+    env = server.get("env", {})
+    if not isinstance(env, dict):
+        return None
+
+    raw_auth = env.get("AUTH") or env.get("Authorization")
+    if not isinstance(raw_auth, str):
+        return None
+    raw_auth = raw_auth.strip()
+    if not raw_auth:
+        return None
+    if raw_auth.lower().startswith("bearer "):
+        return raw_auth[7:].strip() or None
+    return raw_auth
+
+
+def _cowork_obsidian_port(desktop_config_path: Optional[Path] = None) -> Optional[int]:
+    """Extract the Cowork obsidian MCP port from desktop config."""
+    server = _load_cowork_obsidian_server(desktop_config_path)
+    if server is None:
+        return None
+
+    args = server.get("args", [])
+    if not isinstance(args, list):
+        return None
+
+    for arg in args:
+        if not isinstance(arg, str):
+            continue
+        parsed = urlparse(arg)
+        if parsed.scheme in {"http", "https"} and parsed.port is not None:
+            return parsed.port
+    return None
+
+
+def _find_plugin_script(plugin_root: Path, script_name: str) -> Optional[Path]:
+    """Locate a plugin script across repo and runtime bundle layouts."""
+    for candidate in (
+        plugin_root / "scripts" / script_name,
+        plugin_root / "secondbrain" / "scripts" / script_name,
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _find_installed_plugin_json(plugin_root: Path) -> Optional[Path]:
+    """Locate runtime plugin metadata across repo and runtime layouts."""
+    for candidate in (
+        plugin_root / ".claude-plugin" / "plugin.json",
+        plugin_root / "secondbrain" / ".claude-plugin" / "plugin.json",
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def check_plugin_root(plugin_root: Optional[Path] = None) -> CheckResult:
+    """Check 1: resolve the plugin root from env or the current doctor runtime."""
+    env_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if env_root:
+        path = Path(env_root)
+        if not path.is_dir():
+            return CheckResult(
+                name="plugin_root",
+                status="fail",
+                message=(
+                    f"CLAUDE_PLUGIN_ROOT points at {path} which does not exist. "
+                    f"Fix: /plugin install stjepanvrbic/secondbrain"
+                ),
+                fixable=False,
+            )
+
+    resolved = _resolve_plugin_root(plugin_root)
+    if resolved is None:
         return CheckResult(
             name="plugin_root",
             status="fail",
@@ -110,34 +249,22 @@ def check_plugin_root() -> CheckResult:
             ),
             fixable=False,
         )
-    path = Path(root)
-    if not path.is_dir():
-        return CheckResult(
-            name="plugin_root",
-            status="fail",
-            message=(
-                f"CLAUDE_PLUGIN_ROOT points at {path} which does not exist. "
-                f"Fix: /plugin install stjepanvrbic/secondbrain"
-            ),
-            fixable=False,
-        )
     return CheckResult(
         name="plugin_root",
         status="pass",
-        message=f"CLAUDE_PLUGIN_ROOT={path}",
+        message=f"CLAUDE_PLUGIN_ROOT={resolved}",
         fixable=False,
     )
 
 
-def check_environment() -> CheckResult:
+def check_environment(environment: Optional[str] = None) -> CheckResult:
     """Check 2: detect Code vs Cowork (informational only — always passes).
 
     Uses `setup_steps.detect_environment` so there's one source of truth
     for environment detection across init + doctor.
     """
     try:
-        import setup_steps  # type: ignore[reportMissingImports]
-        env = setup_steps.detect_environment()
+        env = environment or _detect_environment()
     except Exception as exc:  # noqa: BLE001
         return CheckResult(
             name="environment",
@@ -155,14 +282,28 @@ def check_environment() -> CheckResult:
     )
 
 
-def check_obsidian_api_key() -> CheckResult:
-    """Check 3: OBSIDIAN_API_KEY env var is set and non-empty.
+def check_obsidian_api_key(
+    environment: Optional[str] = None,
+    desktop_config_path: Optional[Path] = None,
+) -> CheckResult:
+    """Check 3: Obsidian auth is available from env (Code) or desktop config (Cowork).
 
     Not auto-fixable: doctor cannot mint an API key — it has to be obtained
     from Obsidian's Connect MCP plugin. Previously this check advertised
     `setup_env_vars` as a fix target, but `setup_env_vars(api_key=None, ...)`
     short-circuits to a no-op, so the fix was a lie. Escalate to init instead.
     """
+    env = environment or _detect_environment()
+    if env == "cowork":
+        key = _cowork_obsidian_api_key(desktop_config_path)
+        if key:
+            return CheckResult(
+                name="obsidian_api_key",
+                status="pass",
+                message="Obsidian API key is configured in Cowork desktop config",
+                fixable=False,
+            )
+
     key = os.environ.get("OBSIDIAN_API_KEY", "")
     if not key:
         return CheckResult(
@@ -185,14 +326,28 @@ def check_obsidian_api_key() -> CheckResult:
     )
 
 
-def check_obsidian_mcp_port() -> CheckResult:
-    """Check 4: OBSIDIAN_MCP_PORT env var is set and numeric.
+def check_obsidian_mcp_port(
+    environment: Optional[str] = None,
+    desktop_config_path: Optional[Path] = None,
+) -> CheckResult:
+    """Check 4: Obsidian MCP port is available from env (Code) or desktop config (Cowork).
 
     Not auto-fixable: doctor cannot guess which port the user's Connect MCP
     plugin is bound to. Previously this check advertised `setup_env_vars`,
     but that helper short-circuits when both `api_key` and `port` are None,
     so the fix was a structural no-op. Escalate to init instead.
     """
+    env = environment or _detect_environment()
+    if env == "cowork":
+        port = _cowork_obsidian_port(desktop_config_path)
+        if port is not None:
+            return CheckResult(
+                name="obsidian_mcp_port",
+                status="pass",
+                message=f"Cowork desktop config points obsidian MCP at port {port}",
+                fixable=False,
+            )
+
     port_str = os.environ.get("OBSIDIAN_MCP_PORT", "")
     if not port_str:
         return CheckResult(
@@ -227,12 +382,68 @@ def check_obsidian_mcp_port() -> CheckResult:
     )
 
 
-def check_obsidian_running() -> CheckResult:
+def _build_mcp_client(
+    environment: Optional[str] = None,
+    desktop_config_path: Optional[Path] = None,
+) -> Any:
+    """Construct a ConnectMCPClient for the current environment."""
+    import connect_mcp_client  # type: ignore[reportMissingImports]
+
+    env = environment or _detect_environment()
+    if env == "cowork":
+        port = _cowork_obsidian_port(desktop_config_path)
+        api_key = _cowork_obsidian_api_key(desktop_config_path)
+        if port is not None and api_key:
+            return connect_mcp_client.ConnectMCPClient(port=port, api_key=api_key)
+    return connect_mcp_client.ConnectMCPClient()
+
+
+def check_obsidian_running(
+    environment: Optional[str] = None,
+    desktop_config_path: Optional[Path] = None,
+    client_factory: Optional[Callable[[], Any]] = None,
+) -> CheckResult:
     """Check 5: Obsidian process is running (best effort, platform-dependent).
 
-    Uses `pgrep` if available, falls back to `ps`. On Windows or other
-    environments where neither is available, returns `skip`.
+    Uses `pgrep` if available, falls back to `ps`. In Cowork, the more
+    reliable signal is a live MCP round-trip rather than host process
+    inspection from the sandbox.
     """
+    env = environment or _detect_environment()
+    if env == "cowork":
+        try:
+            client = client_factory() if client_factory is not None else _build_mcp_client(
+                environment=env,
+                desktop_config_path=desktop_config_path,
+            )
+            reachable = bool(client.is_reachable())
+        except Exception as exc:  # noqa: BLE001
+            return CheckResult(
+                name="obsidian_running",
+                status="fail",
+                message=(
+                    "Could not confirm Obsidian from Cowork via Connect MCP: "
+                    f"{exc}. Open Obsidian and make sure Connect MCP is enabled."
+                ),
+                fixable=False,
+            )
+        if reachable:
+            return CheckResult(
+                name="obsidian_running",
+                status="pass",
+                message="Obsidian is reachable via Connect MCP in Cowork",
+                fixable=False,
+            )
+        return CheckResult(
+            name="obsidian_running",
+            status="fail",
+            message=(
+                "Obsidian is not reachable via Connect MCP in Cowork. "
+                "Open Obsidian and make sure the Connect MCP plugin is enabled."
+            ),
+            fixable=False,
+        )
+
     if shutil.which("pgrep"):
         try:
             r = subprocess.run(
@@ -258,21 +469,55 @@ def check_obsidian_running() -> CheckResult:
         except (OSError, subprocess.TimeoutExpired) as exc:
             return CheckResult(
                 name="obsidian_running",
-                status="skip",
+                status="fail",
                 message=f"pgrep failed: {exc}",
                 fixable=False,
             )
 
-    # Fallback: no pgrep available (Windows, minimal alpine, etc.)
+    if shutil.which("ps"):
+        try:
+            r = subprocess.run(
+                ["ps", "-A", "-o", "comm="],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            commands = [line.strip().lower() for line in r.stdout.splitlines()]
+            if any("obsidian" in command for command in commands):
+                return CheckResult(
+                    name="obsidian_running",
+                    status="pass",
+                    message="Obsidian process detected via ps",
+                    fixable=False,
+                )
+            return CheckResult(
+                name="obsidian_running",
+                status="fail",
+                message=(
+                    "Obsidian is not running. Open /Applications/Obsidian.app "
+                    "(or the Obsidian you installed via package manager)."
+                ),
+                fixable=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return CheckResult(
+                name="obsidian_running",
+                status="fail",
+                message=f"ps failed: {exc}",
+                fixable=False,
+            )
+
     return CheckResult(
         name="obsidian_running",
-        status="skip",
-        message="pgrep not available on this platform — cannot check process list",
+        status="fail",
+        message="Neither pgrep nor ps is available on this platform — cannot inspect processes",
         fixable=False,
     )
 
 
 def check_mcp_connection(
+    environment: Optional[str] = None,
+    desktop_config_path: Optional[Path] = None,
     client_factory: Optional[Callable[[], Any]] = None,
 ) -> CheckResult:
     """Check 6: Connect MCP is reachable via ConnectMCPClient.
@@ -286,8 +531,13 @@ def check_mcp_connection(
         try:
             import connect_mcp_client  # type: ignore[reportMissingImports]
 
+            env = environment or _detect_environment()
+
             def _default_factory() -> Any:
-                return connect_mcp_client.ConnectMCPClient()
+                return _build_mcp_client(
+                    environment=env,
+                    desktop_config_path=desktop_config_path,
+                )
 
             client_factory = _default_factory
         except ImportError as exc:
@@ -513,7 +763,7 @@ def check_scheduled_tasks(env: str) -> CheckResult:
     This is intentionally best-effort. In Code, we'd want to call
     `CronList` — but that's only available from inside an agent session,
     not from a Python subprocess. So doctor's read-only check can't
-    definitively verify the state; it returns `skip` with a note telling
+    definitively verify the state; it returns a warning with a note telling
     the agent to verify via CronList in the surrounding skill body.
 
     In Cowork, we check for `.scheduled-tasks/` SKILL.md files inside
@@ -522,7 +772,7 @@ def check_scheduled_tasks(env: str) -> CheckResult:
     if env == "code":
         return CheckResult(
             name="scheduled_tasks",
-            status="skip",
+            status="warning",
             message=(
                 "scheduled-task registration must be verified via CronList "
                 "from the agent session — doctor's Python subprocess cannot "
@@ -532,10 +782,10 @@ def check_scheduled_tasks(env: str) -> CheckResult:
         )
 
     # Cowork: try to locate the workspace root. In the absence of a clear
-    # contract, degrade to skip.
+    # contract, degrade to a warning.
     return CheckResult(
         name="scheduled_tasks",
-        status="skip",
+        status="warning",
         message=(
             "scheduled-task presence is verified by the init skill in Cowork "
             "via workspace/.scheduled-tasks — doctor cannot definitively "
@@ -555,14 +805,14 @@ def check_last_dream_protocol_run(vault_path: Path) -> CheckResult:
     """Check 13: examine the most recent dream-protocol entry in log.md.
 
     Informational — reports pass when the most recent run was clean,
-    warning when it mentions "issues" or "errors", skip if no run has
-    ever happened. Never fixable.
+    warning when it mentions "issues" or "errors", warning if the log is
+    missing or there has never been a run. Never fixable.
     """
     log = vault_path / "log.md"
     if not log.exists():
         return CheckResult(
             name="last_dream_protocol_run",
-            status="skip",
+            status="warning",
             message="log.md missing — cannot check last dream-protocol run",
             fixable=False,
         )
@@ -571,7 +821,7 @@ def check_last_dream_protocol_run(vault_path: Path) -> CheckResult:
     except OSError as exc:
         return CheckResult(
             name="last_dream_protocol_run",
-            status="skip",
+            status="warning",
             message=f"could not read log.md: {exc}",
             fixable=False,
         )
@@ -580,7 +830,7 @@ def check_last_dream_protocol_run(vault_path: Path) -> CheckResult:
     if not matches:
         return CheckResult(
             name="last_dream_protocol_run",
-            status="skip",
+            status="warning",
             message="no dream-protocol entries in log.md yet",
             fixable=False,
         )
@@ -668,7 +918,7 @@ def check_vault_identity_cross(
     if mcp_client is None:
         return CheckResult(
             name="vault_identity_cross",
-            status="skip",
+            status="fail",
             message="no MCP client available to cross-check vault_id",
             fixable=False,
         )
@@ -676,6 +926,18 @@ def check_vault_identity_cross(
     try:
         mcp_raw = mcp_client.vault_read(".secondbrain-installed")
     except Exception as exc:  # noqa: BLE001
+        exc_message = str(exc).lower()
+        if isinstance(exc, FileNotFoundError) or "file not found" in exc_message:
+            return CheckResult(
+                name="vault_identity_cross",
+                status="fail",
+                message=(
+                    "MCP could not read .secondbrain-installed. Dotfiles may be hidden "
+                    "from Obsidian MCP in this environment, so doctor cannot prove the "
+                    "open vault matches VAULT_PATH."
+                ),
+                fixable=False,
+            )
         return CheckResult(
             name="vault_identity_cross",
             status="fail",
@@ -731,22 +993,22 @@ def check_hot_memory_schema(vault_path: Path, plugin_root: Path) -> CheckResult:
     via `validate_hot_memory.py --quiet <path>`.
 
     Behavior:
-      - `validate_hot_memory.py` missing at the expected script path → skip
+      - `validate_hot_memory.py` missing at the expected script path → fail
         with explanation (usually means a partial install).
       - hot-memory file missing → fail with a pointer to dream-protocol.
       - hot-memory file present but invalid → fail with the validator's
         stderr captured in the message.
       - All-good → pass.
     """
-    validator = plugin_root / "secondbrain" / "scripts" / "validate_hot_memory.py"
-    if not validator.exists():
+    validator = _find_plugin_script(plugin_root, "validate_hot_memory.py")
+    if validator is None:
         return CheckResult(
             name="hot_memory_schema",
-            status="skip",
+            status="fail",
             message=(
                 "validate_hot_memory.py is not present at "
-                f"{validator}. Skipping the hot-memory check — the plugin "
-                "may be only partially installed."
+                f"{plugin_root}. The plugin install is incomplete, so the "
+                "hot-memory check cannot run."
             ),
             fixable=False,
         )
@@ -823,7 +1085,7 @@ def check_core_hooks_path(repo_root: Path) -> CheckResult:
     if not git_dir.exists():
         return CheckResult(
             name="core_hooks_path",
-            status="skip",
+            status="fail",
             message=f"{repo_root} is not a git repo — cannot check core.hooksPath",
             fixable=False,
         )
@@ -836,7 +1098,7 @@ def check_core_hooks_path(repo_root: Path) -> CheckResult:
     except (OSError, subprocess.TimeoutExpired) as exc:
         return CheckResult(
             name="core_hooks_path",
-            status="skip",
+            status="fail",
             message=f"git config failed: {exc}",
             fixable=False,
         )
@@ -1044,13 +1306,14 @@ def check_plugin_version_mismatch(
 
     Cowork's extracted runtime bundle carries its own `plugin.json`. That file
     is the concrete thing the user is actually running, so doctor compares its
-    version against the latest GitHub release tag and cleanly skips offline.
+    version against the latest GitHub release tag and warns cleanly when the
+    latest-release lookup is unavailable.
     """
-    plugin_json = plugin_root / ".claude-plugin" / "plugin.json"
-    if not plugin_json.is_file():
+    plugin_json = _find_installed_plugin_json(plugin_root)
+    if plugin_json is None:
         return CheckResult(
             name="plugin_version_mismatch",
-            status="skip",
+            status="fail",
             message="cannot find installed plugin.json",
             fixable=False,
         )
@@ -1060,7 +1323,7 @@ def check_plugin_version_mismatch(
     except Exception:
         return CheckResult(
             name="plugin_version_mismatch",
-            status="skip",
+            status="fail",
             message="cannot read installed plugin metadata",
             fixable=False,
         )
@@ -1069,7 +1332,7 @@ def check_plugin_version_mismatch(
     if not isinstance(installed_version, str) or not installed_version:
         return CheckResult(
             name="plugin_version_mismatch",
-            status="skip",
+            status="fail",
             message="installed plugin.json is missing a version field",
             fixable=False,
         )
@@ -1078,7 +1341,7 @@ def check_plugin_version_mismatch(
     if not repo_slug:
         return CheckResult(
             name="plugin_version_mismatch",
-            status="skip",
+            status="fail",
             message="cannot determine repository slug for latest-release check",
             fixable=False,
         )
@@ -1089,7 +1352,7 @@ def check_plugin_version_mismatch(
     except Exception as exc:
         return CheckResult(
             name="plugin_version_mismatch",
-            status="skip",
+            status="warning",
             message=f"latest release check unavailable: {exc}",
             fixable=False,
         )
@@ -1126,7 +1389,7 @@ def check_vault_verification(vault_path: Path) -> CheckResult:
     except ImportError:
         return CheckResult(
             name="vault_verification",
-            status="skip",
+            status="fail",
             message="verify_vault.py not importable",
             fixable=False,
         )
@@ -1184,17 +1447,17 @@ def run_all_checks(
     vault_path: Path,
     repo_root: Optional[Path] = None,
     plugin_root: Optional[Path] = None,
+    environment: Optional[str] = None,
+    desktop_config_path: Optional[Path] = None,
     mcp_client_factory: Optional[Callable[[], Any]] = None,
 ) -> List[CheckResult]:
     """Run every check in dependency order and return the results.
 
-    Order matters: if `check_mcp_connection` fails, none of the
-    vault-identity / vault-side checks make sense, so we mark them
-    `skip` rather than running a potentially-lying filesystem-only
-    check.
+    Order matters: vault and MCP prerequisites should fail loudly rather
+    than disappearing behind skips.
 
     `repo_root` is for `check_core_hooks_path` — pass the secondbrain
-    repo clone. If None, the check is skipped.
+    repo clone. If None, the check degrades to a warning.
 
     `plugin_root` is for `check_hot_memory_schema` — pass the
     `CLAUDE_PLUGIN_ROOT` path. If None, defaults to the env var.
@@ -1202,35 +1465,53 @@ def run_all_checks(
     `mcp_client_factory` is for test injection into `check_mcp_connection`.
     Production callers pass None.
     """
-    plugin_root = plugin_root or Path(os.environ.get("CLAUDE_PLUGIN_ROOT", ""))
+    plugin_root = _resolve_plugin_root(plugin_root) or Path(
+        plugin_root or os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    )
+    env = environment or _detect_environment()
     results: List[CheckResult] = []
 
     # Check 0 — vaults.json config (hooks depend on this, run first).
     results.append(check_vaults_config())
 
     # Checks 1-5 don't need vault access.
-    results.append(check_plugin_root())
-    results.append(check_environment())
-    api_key_result = check_obsidian_api_key()
+    results.append(check_plugin_root(plugin_root))
+    results.append(check_environment(environment=env))
+    api_key_result = check_obsidian_api_key(
+        environment=env,
+        desktop_config_path=desktop_config_path,
+    )
     results.append(api_key_result)
-    port_result = check_obsidian_mcp_port()
+    port_result = check_obsidian_mcp_port(
+        environment=env,
+        desktop_config_path=desktop_config_path,
+    )
     results.append(port_result)
-    results.append(check_obsidian_running())
+    results.append(
+        check_obsidian_running(
+            environment=env,
+            desktop_config_path=desktop_config_path,
+            client_factory=mcp_client_factory if env == "cowork" else None,
+        )
+    )
 
-    # Check 6 — MCP connection. Depends on env vars being set.
+    # Check 6 — MCP connection.
     if api_key_result.status != "pass" or port_result.status != "pass":
         mcp_result = CheckResult(
             name="mcp_connection",
-            status="skip",
-            message="skipped because OBSIDIAN_API_KEY / OBSIDIAN_MCP_PORT are not set",
+            status="fail",
+            message="cannot check MCP because obsidian_api_key and/or obsidian_mcp_port failed",
             fixable=False,
         )
     else:
-        mcp_result = check_mcp_connection(client_factory=mcp_client_factory)
+        mcp_result = check_mcp_connection(
+            environment=env,
+            desktop_config_path=desktop_config_path,
+            client_factory=mcp_client_factory,
+        )
     results.append(mcp_result)
 
-    # MCP client — reused by check_vault_identity_cross. We only build
-    # it if MCP came up; otherwise the identity check is skipped.
+    # MCP client — reused by check_vault_identity_cross.
     mcp_client: Optional[Any] = None
     if mcp_result.status == "pass":
         # Build a real client for downstream checks unless tests injected a factory.
@@ -1241,31 +1522,26 @@ def run_all_checks(
                 mcp_client = None
         else:
             try:
-                import connect_mcp_client  # type: ignore[reportMissingImports]
-                mcp_client = connect_mcp_client.ConnectMCPClient()
+                mcp_client = _build_mcp_client(
+                    environment=env,
+                    desktop_config_path=desktop_config_path,
+                )
             except Exception:  # noqa: BLE001
                 mcp_client = None
 
     # Check 6.5 — vault identity cross-check. We call it even when MCP is
-    # down: the function handles `mcp_client=None` by still running the
-    # FS-side marker validation (which can still surface "marker missing"
-    # or "marker has no vault_id") and then returning "skip" for the
-    # cross-check proper. This means "marker needs vault_id" is still
-    # fixable in Phase 2 even if the user opens doctor offline.
+    # down so the filesystem-side marker validation still runs.
     results.append(check_vault_identity_cross(vault_path, mcp_client=mcp_client))
 
-    # Checks 7-13 — vault-side filesystem checks. Skip all if MCP is down,
-    # except check 7 (vault_reachable), which is just a local filesystem
-    # check. But if MCP fails because the VAULT_PATH is wrong, it's more
-    # useful to see "vault_reachable: fail" than to hide it as a skip, so
-    # we run check 7 unconditionally.
+    # Checks 7-13 — vault-side filesystem checks. `vault_reachable` runs
+    # unconditionally because a wrong VAULT_PATH should surface directly.
     vault_reachable_result = check_vault_reachable(vault_path)
     results.append(vault_reachable_result)
 
     if vault_reachable_result.status == "fail":
-        # Cascading skip for filesystem-dependent checks. Any check whose
+        # Cascading fail for filesystem-dependent checks. Any check whose
         # normal-path branch runs only when the vault is reachable must be
-        # emitted here as a skip — otherwise callers that index results by
+        # emitted here as a fail — otherwise callers that index results by
         # name will see a ragged shape between healthy and broken vaults.
         for name in (
             "manifest", "log_md", "profile", "standard_folders",
@@ -1275,8 +1551,8 @@ def run_all_checks(
         ):
             results.append(CheckResult(
                 name=name,
-                status="skip",
-                message="skipped because vault path is unreachable",
+                status="fail",
+                message="cannot check because vault path is unreachable",
                 fixable=False,
             ))
     else:
@@ -1287,11 +1563,6 @@ def run_all_checks(
 
         # Env-dependent — best-effort, but we can at least tell CronList
         # to run from outside this module.
-        try:
-            import setup_steps  # type: ignore[reportMissingImports]
-            env = setup_steps.detect_environment()
-        except Exception:  # noqa: BLE001
-            env = "code"
         results.append(check_scheduled_tasks(env))
 
         results.append(check_last_dream_protocol_run(vault_path))
@@ -1315,8 +1586,8 @@ def run_all_checks(
     else:
         results.append(CheckResult(
             name="core_hooks_path",
-            status="skip",
-            message="repo_root not provided — skipping core.hooksPath check",
+            status="warning",
+            message="repo_root not provided — cannot check core.hooksPath",
             fixable=False,
         ))
 

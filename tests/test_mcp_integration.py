@@ -3,8 +3,7 @@
 These tests require Obsidian to be running with the connect-mcp plugin active.
 They test the actual MCP protocol handshake and tool calls end-to-end.
 
-Skip with: pytest -m "not integration"
-Run only: pytest -m integration
+They fail loudly when the MCP server or API key is unavailable.
 """
 
 import json
@@ -15,21 +14,8 @@ from pathlib import Path
 
 import pytest
 
-# Config from environment or defaults
-MCP_PORT = int(os.environ.get("OBSIDIAN_MCP_PORT", "27124"))
 MCP_KEY = os.environ.get("OBSIDIAN_API_KEY", "")
-MCP_BASE = f"http://localhost:{MCP_PORT}"
-
-
-def mcp_available() -> bool:
-    """Check if the MCP server is reachable."""
-    try:
-        req = urllib.request.Request(f"{MCP_BASE}/health")
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read())
-            return data.get("status") == "ok"
-    except (urllib.error.URLError, OSError, json.JSONDecodeError):
-        return False
+API_KEY = ""
 
 
 def read_api_key() -> str:
@@ -49,16 +35,25 @@ def read_api_key() -> str:
                 pass
     return ""
 
-
-skip_no_mcp = pytest.mark.skipif(
-    not mcp_available(),
-    reason="Obsidian MCP server not running (need Obsidian with connect-mcp plugin)",
-)
-
 API_KEY = read_api_key()
-skip_no_key = pytest.mark.skipif(not API_KEY, reason="No API key found for connect-mcp")
+MCP_PORT = int(os.environ.get("OBSIDIAN_MCP_PORT", "27124"))
+MCP_BASE = f"http://localhost:{MCP_PORT}"
 
-pytestmark = [pytest.mark.integration, skip_no_mcp, skip_no_key]
+pytestmark = pytest.mark.integration
+
+
+def _assert_mcp_prereqs() -> None:
+    """Fail immediately if the live MCP test environment is unavailable."""
+    assert API_KEY, "No API key found for connect-mcp"
+    try:
+        req = urllib.request.Request(f"{MCP_BASE}/health")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        raise AssertionError(
+            "Obsidian MCP server not running (need Obsidian with connect-mcp plugin)"
+        ) from exc
+    assert data.get("status") == "ok", f"unexpected MCP health payload: {data!r}"
 
 
 class MCPSession:
@@ -120,6 +115,7 @@ class MCPSession:
 
 @pytest.fixture
 def mcp():
+    _assert_mcp_prereqs()
     session = MCPSession()
     session.initialize()
     return session
@@ -127,6 +123,7 @@ def mcp():
 
 class TestMCPHandshake:
     def test_health_check(self):
+        _assert_mcp_prereqs()
         req = urllib.request.Request(f"{MCP_BASE}/health")
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read())
@@ -134,6 +131,7 @@ class TestMCPHandshake:
         assert data["plugin"] == "obsidian-connect-mcp"
 
     def test_initialize(self):
+        _assert_mcp_prereqs()
         session = MCPSession()
         result = session.initialize()
         assert result["result"]["serverInfo"]["name"] == "obsidian-connect-mcp"

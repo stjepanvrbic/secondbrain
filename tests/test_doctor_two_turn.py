@@ -215,7 +215,7 @@ class TestDiagnoseJsonMode:
             assert "name" in result
             assert "status" in result
             assert "message" in result
-            assert result["status"] in ("pass", "fail", "skip", "warning")
+            assert result["status"] in ("pass", "fail", "warning")
 
     def test_json_includes_summary(
         self,

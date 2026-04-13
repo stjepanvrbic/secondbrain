@@ -213,6 +213,13 @@ def parse_wikilink(raw: str) -> Tuple[str, str]:
     return target, ""
 
 
+def _slugify_wikilink_target(target: str) -> str:
+    """Normalize a display-style link target into a kebab-case slug."""
+    slug = target.lower().strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    return slug.strip("-")
+
+
 def resolve_wikilink(target: str, index: VaultIndex) -> Optional[Path]:
     """Resolve a wikilink target to an absolute path, or None."""
     if not target:
@@ -242,6 +249,24 @@ def resolve_wikilink(target: str, index: VaultIndex) -> Optional[Path]:
     for rel_str, abs_path in index.relative_to_abs.items():
         if rel_str.lower().endswith(target_lower):
             return abs_path
+
+    # 4. Compatibility fallbacks for legacy display-style links.
+    target_stem = target.removesuffix(".md").rsplit("/", 1)[-1]
+    slug = _slugify_wikilink_target(target_stem)
+    if slug:
+        for cand in (
+            f"entities/{slug}.md",
+            f"{slug}/{slug}-index.md",
+            slug,
+        ):
+            if cand in index.relative_to_abs:
+                return index.relative_to_abs[cand]
+
+        matches = index.stem_to_paths.get(slug, [])
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            return matches[0]
 
     return None
 
