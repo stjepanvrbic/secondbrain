@@ -7,7 +7,7 @@ description: >
   decisions, or timeline. Vault is source of truth — FORBIDDEN to answer from
   memory when vault has the answer.
 metadata:
-  version: "3.5.15"
+  version: "3.5.16"
 ---
 
 # Core Rule
