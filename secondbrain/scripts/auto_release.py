@@ -1,69 +1,44 @@
 #!/usr/bin/env python3
-"""Helpers for automatic patch releases on pushes to main."""
+"""Helpers for automatic patch version bumps on pushes to main."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import re
-import subprocess
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
+from typing import Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SEMVER_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
-RELEASE_COMMIT_RE = re.compile(r"^release:\s+v\d+\.\d+\.\d+$")
+PLUGIN_MANIFEST = REPO_ROOT / "secondbrain" / ".claude-plugin" / "plugin.json"
+VERSION_BUMP_COMMIT_RE = re.compile(r"^chore:\s+bump version to \d+\.\d+\.\d+$")
 
 
-def _parse_tag(tag: str) -> tuple[int, int, int]:
-    match = SEMVER_TAG_RE.fullmatch(tag)
-    if not match:
-        raise ValueError(f"not a semver tag: {tag!r}")
-    return tuple(int(part) for part in match.groups())
+def parse_version(version: str) -> tuple[int, int, int]:
+    major, minor, patch = version.split(".")
+    return int(major), int(minor), int(patch)
 
 
-def is_semver_tag(tag: str) -> bool:
-    return bool(SEMVER_TAG_RE.fullmatch(tag))
+def read_current_version(repo_root: Path = REPO_ROOT) -> str:
+    manifest = json.loads((repo_root / "secondbrain" / ".claude-plugin" / "plugin.json").read_text())
+    return manifest["version"]
 
 
-def latest_semver_tag(tags: Iterable[str]) -> Optional[str]:
-    semver_tags = [tag for tag in tags if is_semver_tag(tag)]
-    if not semver_tags:
-        return None
-    return max(semver_tags, key=_parse_tag)
-
-
-def next_patch_version(tag: str) -> str:
-    major, minor, patch = _parse_tag(tag)
+def next_patch_version(version: str) -> str:
+    major, minor, patch = parse_version(version)
     return f"{major}.{minor}.{patch + 1}"
 
 
-def release_asset_name(version: str) -> str:
-    return f"secondbrain-v{version}.zip"
+def compute_next_version(repo_root: Path = REPO_ROOT) -> str:
+    return next_patch_version(read_current_version(repo_root))
 
 
-def is_release_commit_message(message: str) -> bool:
-    return bool(RELEASE_COMMIT_RE.fullmatch(message.strip()))
+def is_version_bump_commit_message(message: str) -> bool:
+    return bool(VERSION_BUMP_COMMIT_RE.fullmatch(message.strip()))
 
 
 def should_skip_auto_release(*, actor: str, head_commit_message: str) -> bool:
-    return actor == "github-actions[bot]" and is_release_commit_message(head_commit_message)
-
-
-def git_tags(repo_root: Path = REPO_ROOT) -> list[str]:
-    proc = subprocess.run(
-        ["git", "-C", str(repo_root), "tag", "-l", "v*", "--sort=-v:refname"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-
-
-def compute_next_release_version(repo_root: Path = REPO_ROOT) -> str:
-    tag = latest_semver_tag(git_tags(repo_root))
-    if tag is None:
-        raise RuntimeError("repository has no semver release tag")
-    return next_patch_version(tag)
+    return actor == "github-actions[bot]" and is_version_bump_commit_message(head_commit_message)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -72,9 +47,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     next_version = subparsers.add_parser("next-version")
     next_version.add_argument("--repo-root", default=str(REPO_ROOT))
-
-    asset = subparsers.add_parser("release-asset")
-    asset.add_argument("version")
 
     skip = subparsers.add_parser("should-skip")
     skip.add_argument("--actor", required=True)
@@ -87,11 +59,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.command == "next-version":
-        print(compute_next_release_version(Path(args.repo_root).resolve()))
-        return 0
-
-    if args.command == "release-asset":
-        print(release_asset_name(args.version))
+        print(compute_next_version(Path(args.repo_root).resolve()))
         return 0
 
     if args.command == "should-skip":

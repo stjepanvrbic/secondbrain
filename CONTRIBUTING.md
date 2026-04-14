@@ -16,7 +16,7 @@ python3 secondbrain/scripts/install_git_hooks.py
 
 The plugin is Markdown skill files (under `secondbrain/skills/`) plus Python scripts (under `secondbrain/scripts/`). There's no build step.
 
-**`install_git_hooks.py` is required after cloning.** It wires `core.hooksPath = .githooks`, which installs the tracked `.githooks/pre-push` hook. That hook refuses to let you push a broken plugin — it runs the full test suite, checks version consistency across marketplace metadata and skill frontmatter, verifies all hook command scripts are resolvable and executable, verifies no orphan scripts, and refuses pushes whose release state is ambiguous. The hook NEVER amends commits during push — if something is wrong, you fix it and push again.
+**`install_git_hooks.py` is required after cloning.** It wires `core.hooksPath = .githooks`, which installs the tracked `.githooks/pre-push` hook. That hook refuses to let you push a broken plugin — it runs the full test suite, checks version consistency across marketplace metadata and skill frontmatter, verifies all hook command scripts are resolvable and executable, verifies no orphan scripts, and validates the repo-backed marketplace install path. The hook NEVER amends commits during push — if something is wrong, you fix it and push again.
 
 ### Running tests
 
@@ -60,33 +60,29 @@ Looking for first issues? These are good entry points:
 
 ## Releasing
 
-**Fully automatic.** Just `git push` to `main`.
+**Version bumps are automatic.** Push to `main`, and GitHub Actions handles the rest.
 
-The local `pre-push` hook is validation-only: it checks version consistency, packaging, and the local Claude marketplace smoke path, but it never mutates the repo or asks for a second push.
+The local `pre-push` hook is validation-only: it checks version consistency, marketplace layout, and the local Claude marketplace smoke path, but it never mutates the repo or asks for a second push.
 
-The actual release mutation happens in GitHub Actions after the push lands on `main`:
+After a push lands on `main`, the `Auto Bump Main` workflow:
 
-1. `Auto Release Main` computes the next patch version from the latest semver tag.
-2. It rewrites `plugin.json`, `marketplace.json`, `release.json`, and all skill frontmatter in one bot-authored release commit.
-3. It creates the annotated `vX.Y.Z` tag on that release commit and pushes both back to `main`.
-4. The same `Auto Release Main` run builds `secondbrain-vX.Y.Z.zip`, validates it, publishes it to GitHub Releases, then downloads the published asset and validates the real uploaded artifact again.
+1. Verifies the repo is internally consistent with `bump_version.py --check`, `validate_distribution.py`, and the focused automation test suite.
+2. Computes the next patch version from the current shipped plugin manifest.
+3. Rewrites `plugin.json`, `marketplace.json`, and all shipped skill frontmatter in one bot-authored commit.
+4. Pushes that single commit back to `main` with the message `chore: bump version to X.Y.Z`.
 
-`push.followTags` is still configured automatically via `install_git_hooks.py`, but contributors do not need to create tags manually for normal releases. The separate `Publish Release` workflow remains available for direct/manual semver tag pushes; automatic main-branch releases do not depend on that follow-on trigger.
-
-**Why this matters:** Cowork's server-managed marketplace relies on git tags and GitHub releases to detect plugin updates. The repository now guarantees those artifacts are created automatically from `main`, and the shipped runtime identity is tracked explicitly in `secondbrain/.claude-plugin/release.json` using the release tag plus the source commit that produced that release.
+There are no authoritative release assets, no extra release manifest, and no tag-driven publish step in the normal path anymore. The GitHub repository itself is the marketplace.
 
 ### Release verification checklist
 
-Do not stop at "push succeeded". A Cowork-facing release is only done when:
+Do not stop at "push succeeded". A Cowork-facing update is only done when:
 
-1. `git ls-remote --tags origin 'v*'` shows the new annotated tag on `origin`
-2. GitHub Actions `Publish Release` passes for that tag
-3. the latest GitHub release exists and includes `secondbrain-vX.Y.Z.zip`
-4. Cowork updates to that version and the extracted runtime bundle's `plugin.json`
-   reports the same version
+1. `Auto Bump Main` succeeds on the original push.
+2. The follow-up `chore: bump version to X.Y.Z` commit lands on `main`.
+3. `.claude-plugin/marketplace.json`, `secondbrain/.claude-plugin/plugin.json`, and all `secondbrain/skills/*/SKILL.md` files report the same version.
+4. Cowork sees `stjepanvrbic/secondbrain` as a GitHub marketplace checkout and installs that bumped version in a fresh session.
 
-If any of those fail, Cowork can continue reporting "already up to date" even
-though your local clone looks correct.
+If any of those fail, Cowork can keep reporting stale runtime state even when the repo itself looks correct.
 
 ---
 

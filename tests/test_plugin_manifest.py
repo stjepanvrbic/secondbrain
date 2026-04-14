@@ -5,12 +5,13 @@ during install or update. Runs against the live repo state, not fixtures.
 
 Checks:
     - plugin.json version stays in lockstep with marketplace plugin version
+    - skill frontmatter versions stay in lockstep with the canonical plugin version
     - marketplace.json source path resolves to a real plugin dir
     - hooks/hooks.json schema and every command resolves to an executable file
     - Every command uses ${CLAUDE_PLUGIN_ROOT} (no hardcoded paths)
     - Every script in scripts/ is referenced by hooks, docs, or allowlisted
     - No stray .DS_Store / __pycache__ / *.pyc inside anything the installer ships
-    - Shipped runtime identity stays in lockstep with the tagged release metadata
+    - Legacy release-asset metadata cannot creep back into the shipped plugin
 """
 
 from __future__ import annotations
@@ -29,10 +30,10 @@ PLUGIN_ROOT = REPO_ROOT / "secondbrain"                  # shipped plugin source
 
 MARKETPLACE_JSON = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 PLUGIN_JSON = PLUGIN_ROOT / ".claude-plugin" / "plugin.json"
-RELEASE_JSON = PLUGIN_ROOT / ".claude-plugin" / "release.json"
 HOOKS_JSON = PLUGIN_ROOT / "hooks" / "hooks.json"
 SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 HOOKS_DIR = PLUGIN_ROOT / "hooks"
+SKILLS_DIR = PLUGIN_ROOT / "skills"
 
 # Scripts that aren't invoked by hooks or skills but are legitimate CLI/dev tools.
 # Everything else in scripts/ MUST be referenced somewhere or it's dead code.
@@ -46,8 +47,8 @@ CLI_ENTRYPOINT_ALLOWLIST = {
     "install_git_hooks.py",    # dev-only: documented in repo-root CONTRIBUTING.md
     "lifecycle_ingest.py",     # hook orchestration helper used by shell wrappers
     "run_ingester_job.py",     # detached ingester runner used by lifecycle_ingest.py
-    "auto_release.py",        # dev-only: main-branch auto release helper used by GitHub Actions
-    "validate_distribution.py",  # dev-only: release ZIP + local Claude install smoke validator
+    "auto_release.py",         # dev-only: main-branch version bump helper used by GitHub Actions
+    "validate_distribution.py",  # dev-only: marketplace layout + local Claude install validator
     "setup_steps.py",          # library-only: imported by init + doctor (wired up in T3/T6)
     "connect_mcp_client.py",   # library-only: imported by dream/hot-memory/doctor (wired up in T10/T11/T13/T14)
     "runtime_resolver.py",     # library-only: imported by connect/doctor/hot-memory
@@ -146,6 +147,11 @@ def parse_semver(v: str) -> tuple[int, int, int]:
     return int(parts[0]), int(parts[1]), int(parts[2])
 
 
+def extract_skill_version(path: Path) -> str | None:
+    match = re.search(r'^\s*version:\s*"(.*?)"', path.read_text(), re.MULTILINE)
+    return match.group(1) if match else None
+
+
 # ----------------------------------------------------------------------
 # Tests
 # ----------------------------------------------------------------------
@@ -200,57 +206,23 @@ class TestVersionConsistency:
         for p in parts:
             assert p.isdigit(), f"version component {p!r} is not numeric"
 
-    def test_release_json_exists_and_matches_plugin_version(self):
-        release = load_json(RELEASE_JSON)
+    def test_skill_frontmatter_versions_match_plugin_version(self):
         plugin = load_json(PLUGIN_JSON)
         plugin_version = plugin["version"]
-        assert release.get("schemaVersion") == 1, (
-            "release.json must declare schemaVersion 1 so runtime identity parsing "
-            "stays stable across marketplace, installed-runtime, and mounted-session checks."
-        )
-        assert release.get("pluginVersion") == plugin_version, (
-            f"release.json pluginVersion {release.get('pluginVersion')!r} != "
-            f"plugin.json version {plugin_version!r}. bump_version.py must keep them aligned."
-        )
-        assert release.get("gitTag") == f"v{plugin_version}", (
-            "release.json gitTag must stay aligned with the shipped plugin version"
-        )
-        assert release.get("releaseAssetName") == f"secondbrain-v{plugin_version}.zip", (
-            "release.json releaseAssetName must stay aligned with the published GitHub asset name"
-        )
+        for skill_path in sorted(SKILLS_DIR.glob("*/SKILL.md")):
+            skill_version = extract_skill_version(skill_path)
+            assert skill_version, f"{skill_path.relative_to(REPO_ROOT)} is missing metadata.version"
+            assert skill_version == plugin_version, (
+                f"{skill_path.relative_to(REPO_ROOT)} metadata.version {skill_version!r} != "
+                f"plugin.json version {plugin_version!r}. bump_version.py must keep every shipped "
+                f"skill version in lockstep with the marketplace version."
+            )
 
-    def test_release_json_commit_is_stable_git_sha_when_present(self):
-        release = load_json(RELEASE_JSON)
-        tag = release["gitTag"]
-        tag_exists = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "tag", "-l", tag],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        assert tag_exists, f"release.json points at missing tag {tag!r}"
-
-        git_commit = release.get("gitCommit")
-        assert isinstance(git_commit, str), "release.json gitCommit must be a string"
-        assert len(git_commit) == 40, (
-            f"release.json gitCommit {git_commit!r} must be a full git SHA for the source commit that produced the release"
-        )
-        assert all(ch in "0123456789abcdef" for ch in git_commit), (
-            f"release.json gitCommit {git_commit!r} must be lowercase hexadecimal"
-        )
-
-    def test_version_is_not_behind_latest_release_tag(self):
-        mj = load_json(MARKETPLACE_JSON)
-        current_str = mj["plugins"][0]["version"]
-        current = parse_semver(current_str)
-        tags = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "tag", "-l", "v*", "--sort=-v:refname"],
-            capture_output=True, text=True, check=True,
-        ).stdout.splitlines()
-        latest_semver = next((tag for tag in tags if re.fullmatch(r"v\d+\.\d+\.\d+", tag)), None)
-        assert latest_semver, "repo must have at least one semver release tag"
-        latest = parse_semver(latest_semver.lstrip("v"))
-        assert current >= latest, (
-            f"plugin version {current_str} is behind latest release tag {latest_semver}. "
-            f"The source tree must never advertise an older runtime identity than the latest release."
+    def test_legacy_release_manifest_is_removed(self):
+        legacy_release_manifest = PLUGIN_ROOT / ".claude-plugin" / "release.json"
+        assert not legacy_release_manifest.exists(), (
+            "secondbrain/.claude-plugin/release.json must stay removed. GitHub marketplace is the "
+            "authoritative install/update path, so legacy release-asset metadata should not ship."
         )
 
 
@@ -389,53 +361,28 @@ class TestGitHooksInstallable:
         )
 
 
-class TestTagHygiene:
-    """Enforce that git tags follow conventions and release tooling exists."""
-
-    def test_tag_format_is_v_prefixed_semver(self):
-        """Every tag in the repo must be v-prefixed semver."""
-        r = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "tag", "-l"],
-            capture_output=True, text=True, check=True,
-        )
-        tags = [t.strip() for t in r.stdout.splitlines() if t.strip()]
-        for tag in tags:
-            assert tag.startswith("v"), (
-                f"tag {tag!r} must start with 'v' (convention: vX.Y.Z)"
-            )
-            parts = tag.lstrip("v").split(".")
-            assert len(parts) == 3 and all(p.isdigit() for p in parts), (
-                f"tag {tag!r} is not valid semver (expected vX.Y.Z)"
-            )
-
-    def test_bump_version_has_create_tag(self):
-        """bump_version.py must expose create_tag for the release workflow."""
+class TestVersionAutomationContract:
+    def test_auto_release_helper_is_bump_only(self):
         import importlib.util
+
         spec = importlib.util.spec_from_file_location(
-            "bump_version",
-            REPO_ROOT / "secondbrain" / "scripts" / "bump_version.py",
+            "auto_release",
+            REPO_ROOT / "secondbrain" / "scripts" / "auto_release.py",
         )
         assert spec is not None and spec.loader is not None
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        assert hasattr(mod, "create_tag"), (
-            "bump_version.py must have a create_tag() function — "
-            "tags are part of the release workflow"
+        assert hasattr(mod, "should_skip_auto_release"), (
+            "auto_release.py must expose should_skip_auto_release() so GitHub Actions can "
+            "avoid re-triggering on its own version bump commit"
         )
-
-    def test_bump_version_has_release(self):
-        """bump_version.py must expose release for the automated pipeline."""
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "bump_version",
-            REPO_ROOT / "secondbrain" / "scripts" / "bump_version.py",
+        assert hasattr(mod, "next_patch_version"), (
+            "auto_release.py must expose next_patch_version() so GitHub Actions can compute "
+            "the next marketplace version deterministically"
         )
-        assert spec is not None and spec.loader is not None
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        assert hasattr(mod, "release"), (
-            "bump_version.py must have a release() function — "
-            "the --release flag depends on it"
+        assert hasattr(mod, "is_version_bump_commit_message"), (
+            "auto_release.py must expose is_version_bump_commit_message() so the workflow can "
+            "identify and skip its own follow-up commit"
         )
 
 

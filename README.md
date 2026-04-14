@@ -22,7 +22,7 @@ Especially good if you have ADHD, are juggling many projects at once, or just ha
 
 ```
 /plugin marketplace add stjepanvrbic/secondbrain
-/plugin install secondbrain@stjepanvrbic-secondbrain
+/plugin install secondbrain@secondbrain
 /secondbrain:init
 ```
 
@@ -45,12 +45,12 @@ About 5 minutes. Works on macOS, Linux, and Windows.
 
 ## Quick start — Claude Cowork
 
-1. Download the latest `secondbrain-vX.Y.Z.zip` from the [GitHub Releases page](https://github.com/stjepanvrbic/secondbrain/releases/latest)
-2. Open Claude Desktop, switch to the **Cowork** tab
-3. Click **Customize** → **Browse plugins** → **Upload** → select the ZIP
-4. Click **Install** → **Authorize**
+1. Open Claude Desktop and switch to the **Cowork** tab
+2. Click **Customize** → **Browse plugins**
+3. Under **Personal**, choose **Add marketplace from GitHub**
+4. Enter `stjepanvrbic/secondbrain`, then install `secondbrain`
 5. In a new Cowork chat, run: `/secondbrain:init`
-6. After init prints a list of `/schedule` commands, copy each one into the Cowork chat to enable scheduled tasks (Cowork doesn't let plugins create scheduled tasks directly — this manual step is unavoidable for now)
+6. After init prints a list of `/schedule` commands, copy each one into the Cowork chat to enable scheduled tasks (Cowork doesn't let plugins create scheduled tasks directly, so this step is still manual)
 
 The init skill works the same in Cowork as in Code, except it auto-detects the environment and adapts (uses Cowork's `/schedule` skill instead of Code's `CronCreate` for scheduled tasks).
 
@@ -227,7 +227,7 @@ Manual recovery:
 
 ### "I want to install the plugin in Cowork but `/plugin install` doesn't work"
 
-Cowork doesn't support direct GitHub install for individual users — only organization marketplaces do. Use the manual ZIP upload flow described in "Quick start — Claude Cowork" above.
+Install it from the Cowork plugin browser instead: **Customize** → **Browse plugins** → **Add marketplace from GitHub**, enter `stjepanvrbic/secondbrain`, then install `secondbrain`.
 
 ### "Something is broken and I don't know what"
 

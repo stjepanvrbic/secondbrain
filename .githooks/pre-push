@@ -51,7 +51,7 @@ bold "pre-push: validation gate starting"
 
 bold "pre-push: [1/4] version consistency check"
 if ! python3 "$BUMP_SCRIPT" --check; then
-    fail "version files are inconsistent" "Fix with:" "    python3 secondbrain/scripts/bump_version.py <version>" "    git add .claude-plugin/marketplace.json secondbrain/.claude-plugin/plugin.json secondbrain/.claude-plugin/release.json secondbrain/skills/*/SKILL.md" "    git commit"
+    fail "version files are inconsistent" "Fix with:" "    python3 secondbrain/scripts/bump_version.py <version>" "    git add .claude-plugin/marketplace.json secondbrain/.claude-plugin/plugin.json secondbrain/skills/*/SKILL.md" "    git commit"
 fi
 
 bold "pre-push: [2/4] plugin manifest tests"
@@ -61,7 +61,7 @@ fi
 
 bold "pre-push: [3/4] distribution validation"
 if ! python3 "$PLUGIN_ROOT/scripts/validate_distribution.py" --claude-smoke; then
-    fail "distribution validation failed — marketplace/install or release ZIP is broken" "Fix the validation errors above, then push again."
+    fail "distribution validation failed — marketplace layout or install/update behavior is broken" "Fix the validation errors above, then push again."
 fi
 
 bold "pre-push: [4/4] full pytest suite"

@@ -1,4 +1,4 @@
-"""Tests for release automation workflow files and local hook behavior."""
+"""Tests for version automation, docs, and validation hooks."""
 
 from __future__ import annotations
 
@@ -6,98 +6,79 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-AUTO_RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "auto-release-main.yml"
-PUBLISH_RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "publish-release.yml"
+AUTO_BUMP_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "auto-bump-main.yml"
+LEGACY_AUTO_RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "auto-release-main.yml"
+LEGACY_PUBLISH_RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "publish-release.yml"
 PRE_PUSH = REPO_ROOT / ".githooks" / "pre-push"
-VALIDATE_DISTRIBUTION = REPO_ROOT / "secondbrain" / "scripts" / "validate_distribution.py"
-AUTO_RELEASE = REPO_ROOT / "secondbrain" / "scripts" / "auto_release.py"
+README = REPO_ROOT / "README.md"
+CONTRIBUTING = REPO_ROOT / "CONTRIBUTING.md"
+ENVIRONMENTS = REPO_ROOT / "secondbrain" / "references" / "environments.md"
 
 
-def test_auto_release_workflow_exists():
-    assert AUTO_RELEASE_WORKFLOW.is_file(), (
-        "main-branch version bumps, tags, and release commits must be automated in GitHub Actions"
-    )
-    assert AUTO_RELEASE.is_file(), (
-        "workflow logic must live in a shared Python helper so release semantics stay testable"
+def test_auto_bump_workflow_exists():
+    assert AUTO_BUMP_WORKFLOW.is_file(), (
+        "main-branch version bumps must be automated in GitHub Actions"
     )
 
 
-def test_auto_release_workflow_triggers_on_pushes_to_main():
-    text = AUTO_RELEASE_WORKFLOW.read_text(encoding="utf-8")
+def test_legacy_release_workflows_are_removed():
+    assert not LEGACY_AUTO_RELEASE_WORKFLOW.exists(), (
+        "auto-release-main.yml should be replaced by a bump-only workflow"
+    )
+    assert not LEGACY_PUBLISH_RELEASE_WORKFLOW.exists(), (
+        "publish-release.yml should be removed when GitHub releases are no longer authoritative"
+    )
+
+
+def test_auto_bump_workflow_triggers_on_pushes_to_main():
+    text = AUTO_BUMP_WORKFLOW.read_text(encoding="utf-8")
     assert "push:" in text
     assert "branches:" in text
     assert "main" in text
 
 
-def test_auto_release_workflow_skips_bot_release_loops_and_publishes_release():
-    text = AUTO_RELEASE_WORKFLOW.read_text(encoding="utf-8")
-    assert "github-actions[bot]" in text or "release:" in text, (
-        "auto-release must skip the follow-up push it creates itself"
+def test_auto_bump_workflow_skips_bot_loops_and_pushes_version_commit_only():
+    text = AUTO_BUMP_WORKFLOW.read_text(encoding="utf-8")
+    assert "github-actions[bot]" in text or "chore: bump version to" in text, (
+        "auto-bump must skip the follow-up push it creates itself"
     )
-    assert "git tag -a" in text, "auto-release must create an annotated semver tag"
-    assert "HEAD:main" in text, "auto-release must push the release commit back to main"
     assert "auto_release.py" in text, (
-        "workflow must use the shared auto_release.py helper rather than duplicating semver logic inline"
+        "workflow must use the shared auto_release.py helper rather than duplicating bump logic inline"
     )
     assert "bump_version.py" in text, (
         "workflow must rewrite version-managed files through bump_version.py"
     )
-    assert "gh release create" in text or "gh release edit" in text, (
-        "auto-release must publish the GitHub release itself because bot-created tags do not trigger downstream workflows"
+    assert "git commit -m \"chore: bump version to" in text, (
+        "workflow must write a single, machine-detectable version bump commit"
     )
-    assert "gh release upload" in text, (
-        "auto-release must upload the installable release asset on the same run that creates the tag"
+    assert "HEAD:main" in text, "auto-bump must push the version commit back to main"
+    assert "gh release" not in text, (
+        "auto-bump workflow must not create or upload GitHub releases"
     )
-    assert "gh release download" in text, (
-        "auto-release must validate the published release asset, not just the locally built zip"
+    assert "git tag" not in text, (
+        "auto-bump workflow must not create tags when GitHub marketplace is authoritative"
     )
-
-
-def test_publish_release_workflow_uploads_and_revalidates_published_asset():
-    text = PUBLISH_RELEASE_WORKFLOW.read_text(encoding="utf-8")
-    assert "git archive --format=zip" in text, (
-        "release workflow must build the shipped plugin zip from tracked files "
-        "so Cowork users can install the latest release directly"
-    )
-    assert "gh release upload" in text, (
-        "release workflow must upload the release zip asset promised by README.md"
-    )
-    assert "gh release download" in text, (
-        "release workflow must download the just-published asset so validation covers the real release artifact"
-    )
-    assert text.count("validate_distribution.py") >= 2, (
-        "release workflow must validate both the built ZIP and the downloaded published asset"
-    )
-
-
-def test_publish_release_workflow_preserves_release_history():
-    text = PUBLISH_RELEASE_WORKFLOW.read_text(encoding="utf-8")
-    assert "gh release delete" not in text, (
-        "release workflow must not delete older semver releases; deleting "
-        "history races with concurrent tag pushes and breaks release URLs"
-    )
-    assert 'git push origin ":refs/tags/$old"' not in text, (
-        "release workflow must not delete semver tags; removing the current tag "
-        "turns the release into an untagged draft"
+    assert "validate_distribution.py" in text, (
+        "auto-bump must still run marketplace/distribution validation"
     )
 
 
 def test_pre_push_is_validation_only():
     text = PRE_PUSH.read_text(encoding="utf-8")
     assert "validate_distribution.py" in text, (
-        "pre-push must validate packaging and the local Claude install smoke path"
+        "pre-push must validate marketplace layout and the local Claude install smoke path"
     )
     assert "--claude-smoke" in text, (
         "pre-push must still run the local Claude marketplace/install smoke test"
     )
-    assert "release_workflow.py" not in text, (
-        "pre-push must not compute or mutate release state locally anymore"
+    assert "release.json" not in text, (
+        "pre-push must not mention removed release-manifest files"
     )
     assert "--release" not in text and "--tag" not in text, (
-        "pre-push must not create commits or tags; release mutation belongs in GitHub Actions"
+        "pre-push must not create commits or tags; automation belongs in GitHub Actions"
     )
-    assert "run 'git push' again" not in text, (
-        "pre-push must not require a second push after mutating the repo"
+    assert "GitHub Releases" not in text and "release ZIP" not in text, (
+        "pre-push must not encode the old release-asset distribution model"
     )
 
 
@@ -127,3 +108,28 @@ def test_pre_push_only_skips_when_every_ref_is_a_delete():
     assert "validation gate starting" in text, (
         "pre-push must continue into the normal validation flow for mixed or regular pushes"
     )
+
+
+def test_docs_use_github_marketplace_flow_and_not_uploads():
+    readme = README.read_text(encoding="utf-8")
+    contributing = CONTRIBUTING.read_text(encoding="utf-8")
+    environments = ENVIRONMENTS.read_text(encoding="utf-8")
+
+    assert "/plugin marketplace add stjepanvrbic/secondbrain" in readme
+    assert "/plugin install secondbrain@secondbrain" in readme
+    assert "Add marketplace from GitHub" in readme
+
+    forbidden = [
+        "stjepanvrbic-secondbrain",
+        "secondbrain-vX.Y.Z.zip",
+        "GitHub Releases",
+        "manual ZIP upload",
+        "Cowork doesn't support direct GitHub install",
+        "Upload ZIP or marketplace",
+        "My Uploads",
+    ]
+
+    for needle in forbidden:
+        assert needle not in readme, f"README still contains legacy distribution guidance: {needle!r}"
+        assert needle not in contributing, f"CONTRIBUTING still contains legacy distribution guidance: {needle!r}"
+        assert needle not in environments, f"environments.md still contains legacy distribution guidance: {needle!r}"

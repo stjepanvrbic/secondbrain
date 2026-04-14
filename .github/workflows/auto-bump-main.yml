@@ -1,0 +1,69 @@
+name: Auto Bump Main
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-bump-main-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  auto-bump-main:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install test dependencies
+        run: python3 -m pip install pytest
+
+      - name: Decide whether to skip this push
+        id: skip
+        env:
+          RELEASE_ACTOR: ${{ github.actor }}
+          RELEASE_HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          skip="$(python3 secondbrain/scripts/auto_release.py should-skip --actor "$RELEASE_ACTOR" --head-commit-message "$RELEASE_HEAD_COMMIT_MESSAGE")"
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
+      - name: Validate marketplace state
+        if: steps.skip.outputs.skip != '1'
+        run: |
+          python3 secondbrain/scripts/bump_version.py --check
+          python3 secondbrain/scripts/validate_distribution.py --repo-root "$GITHUB_WORKSPACE"
+          pytest tests/test_auto_release.py tests/test_bump_version.py tests/test_plugin_manifest.py tests/test_release_workflow_files.py tests/test_validate_distribution.py -q
+
+      - name: Configure git identity
+        if: steps.skip.outputs.skip != '1'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Compute next version
+        if: steps.skip.outputs.skip != '1'
+        id: version
+        run: |
+          next_version="$(python3 secondbrain/scripts/auto_release.py next-version --repo-root "$GITHUB_WORKSPACE")"
+          echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
+
+      - name: Write and push version bump
+        if: steps.skip.outputs.skip != '1'
+        run: |
+          next_version='${{ steps.version.outputs.next_version }}'
+          python3 secondbrain/scripts/bump_version.py "$next_version"
+          git add -- .claude-plugin/marketplace.json secondbrain/.claude-plugin/plugin.json secondbrain/skills/*/SKILL.md
+          git commit -m "chore: bump version to $next_version"
+          python3 secondbrain/scripts/validate_distribution.py --repo-root "$GITHUB_WORKSPACE"
+          git push origin HEAD:main

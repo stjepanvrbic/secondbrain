@@ -35,7 +35,7 @@ Probe for `CronList`:
 
 | Feature | Claude Code | Claude Cowork |
 |---------|-------------|---------------|
-| Plugin install | `/plugin marketplace add` + `/plugin install` | Upload ZIP or marketplace |
+| Plugin install | `/plugin marketplace add` + `/plugin install` | Browse plugins → Add marketplace from GitHub → install `secondbrain` |
 | Plugin cache | `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` | `~/Library/Application Support/Claude/local-agent-mode-sessions/<workspace>/<session>/rpm/plugin_<id>/` |
 | Plugin data | `~/.claude/plugins/data/<plugin>/` | `.../<session>/local_<id>/.claude/plugins/data/<plugin>/` |
 | Settings | `~/.claude/settings.json` | `~/Library/Application Support/Claude/claude_desktop_config.json` |
@@ -148,9 +148,22 @@ Claude Code maintains a local git clone at `~/.claude/plugins/marketplaces/secon
 
 ### Cowork
 
-Cowork's marketplace is server-managed (marketplaceId-based). The plugin is NOT cloned locally by Cowork — the server maintains a clone and syncs it to connected clients. If the server clone becomes stale (no tags pushed, or history disrupted by a force-push), Cowork reports "already up to date" even when the repo has advanced.
+Cowork's repo-backed marketplace state is visible locally. A healthy install has:
 
-**Tags and GitHub releases are the reliable signals that trigger the server to refresh.** Pushes to `main` now trigger an automatic patch release workflow that rewrites the shipped version files, creates the annotated tag, and publishes the GitHub release asset without any manual bump/tag step on the contributor machine.
+- `cowork_plugins/known_marketplaces.json` with a `secondbrain` entry sourced from GitHub repo `stjepanvrbic/secondbrain`
+- `cowork_plugins/marketplaces/secondbrain/` as the local checkout for that marketplace
+- `rpm/plugin_<id>/` as the installed runtime bundle for the current session workspace
+
+If `secondbrain@secondbrain` is enabled in `cowork_settings.json` but `known_marketplaces.json` has no `secondbrain` entry or the checkout directory is missing, Cowork is not actually running the authoritative GitHub marketplace path. `scripts/validate_distribution.py` treats that as a broken install.
+
+Updates are driven by the repository contents themselves. Keep these in lockstep:
+
+- `secondbrain/.claude-plugin/plugin.json` `version`
+- `.claude-plugin/marketplace.json` `metadata.version`
+- `.claude-plugin/marketplace.json` `plugins[].version`
+- every `secondbrain/skills/*/SKILL.md` `metadata.version`
+
+Pushes to `main` trigger an automatic patch-bump workflow that rewrites those files in one bot-authored commit. There is no separate release-asset path to keep in sync.
 
 ## Platform paths (macOS / Linux / Windows)
 
