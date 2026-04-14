@@ -125,7 +125,13 @@ if ! "$PYTEST_BIN" "$TESTS_DIR/test_plugin_manifest.py" -q --no-header; then
         "Fix the failures above, then push again."
 fi
 
-bold "pre-push: [4/4] full pytest suite"
+bold "pre-push: [4/5] distribution validation"
+if ! python3 "$PLUGIN_ROOT/scripts/validate_distribution.py" --claude-smoke; then
+    fail "distribution validation failed — marketplace/install or release ZIP is broken" \
+        "Fix the validation errors above, then push again."
+fi
+
+bold "pre-push: [5/5] full pytest suite"
 if ! "$PYTEST_BIN" "$TESTS_DIR" -q --no-header; then
     fail "tests failed — refusing to push"
 fi

@@ -46,6 +46,7 @@ CLI_ENTRYPOINT_ALLOWLIST = {
     "lifecycle_ingest.py",     # hook orchestration helper used by shell wrappers
     "run_ingester_job.py",     # detached ingester runner used by lifecycle_ingest.py
     "release_workflow.py",     # pure release-state planner used by pre-push
+    "validate_distribution.py",  # dev-only: release ZIP + local Claude install smoke validator
     "setup_steps.py",          # library-only: imported by init + doctor (wired up in T3/T6)
     "connect_mcp_client.py",   # library-only: imported by dream/hot-memory/doctor (wired up in T10/T11/T13/T14)
     "runtime_resolver.py",     # library-only: imported by connect/doctor/hot-memory

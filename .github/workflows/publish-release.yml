@@ -53,6 +53,10 @@ jobs:
           git archive --format=zip --prefix=secondbrain/ -o "$RUNNER_TEMP/$asset" HEAD:secondbrain
           echo "RELEASE_ASSET=$RUNNER_TEMP/$asset" >> "$GITHUB_ENV"
 
+      - name: Validate release zip
+        run: |
+          python3 secondbrain/scripts/validate_distribution.py --zip-path "$RELEASE_ASSET"
+
       - name: Upload release zip
         run: |
           tag="${GITHUB_REF_NAME}"

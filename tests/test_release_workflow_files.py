@@ -8,11 +8,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "publish-release.yml"
 PRE_PUSH = REPO_ROOT / ".githooks" / "pre-push"
+VALIDATE_DISTRIBUTION = REPO_ROOT / "secondbrain" / "scripts" / "validate_distribution.py"
 
 
 def test_publish_release_workflow_exists():
     assert WORKFLOW.is_file(), (
         "release finalization must run in GitHub Actions, not a local post-push script"
+    )
+    assert VALIDATE_DISTRIBUTION.is_file(), (
+        "distribution validation must live in a shared script so pre-push and "
+        "release CI validate the same shipped artifact rules"
     )
 
 
@@ -39,6 +44,10 @@ def test_publish_release_workflow_uploads_cowork_zip_asset():
     assert "secondbrain-${tag}.zip" in text, (
         "release asset name must stay aligned with the README's "
         "`secondbrain-vX.Y.Z.zip` install instructions"
+    )
+    assert "validate_distribution.py" in text, (
+        "release workflow must validate the built ZIP before upload so Cowork "
+        "never gets a malformed release asset"
     )
 
 
@@ -71,3 +80,15 @@ def test_pre_push_uses_pytest_executable_not_python_module_import():
     assert "command -v pytest" in text
     assert "python3 -m pytest" not in text
     assert 'python3 -c "import pytest"' not in text
+
+
+def test_pre_push_runs_distribution_smoke_validation():
+    text = PRE_PUSH.read_text(encoding="utf-8")
+    assert "validate_distribution.py" in text, (
+        "pre-push must validate the release ZIP and the local Claude "
+        "marketplace/install smoke path before allowing a push"
+    )
+    assert "--claude-smoke" in text, (
+        "pre-push must run the local Claude marketplace/install smoke test "
+        "when validating a release candidate"
+    )
