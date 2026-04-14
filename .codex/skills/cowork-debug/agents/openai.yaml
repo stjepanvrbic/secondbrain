@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cowork Debug"
+  short_description: "Orient to Cowork logs, Dispatch bridge state, transcripts, and secondbrain debug paths"
+  default_prompt: "Use $cowork-debug to orient on Cowork's local log layout, how Dispatch bridge state differs from worker and regular conversation transcripts, and how to find secondbrain scheduled-task runs."
