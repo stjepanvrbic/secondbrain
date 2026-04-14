@@ -31,6 +31,7 @@ HOOK = PLUGIN_ROOT / "hooks" / "emit-hot-memory.sh"
 
 sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
 
+from cowork_hygiene import read_session_start_stamp  # type: ignore[reportMissingImports]
 from hot_memory_schema import INITIAL_TEMPLATE  # type: ignore[reportMissingImports]
 
 
@@ -218,6 +219,32 @@ class TestCwdPropagation:
         assert code == 0
         data = json.loads(stdout)
         assert "systemMessage" in data
+
+    def test_hook_passes_session_id_into_runtime_stamp(self, scratch: Path):
+        vault = _make_vault(scratch, with_hot_memory=True)
+        config = scratch / "cfg" / "vaults.json"
+        _write_vaults_config(
+            config,
+            [_make_vault_entry(vault)],
+            active_id="v1",
+        )
+
+        code, stdout, _ = _run_hook(
+            {"cwd": str(vault), "session_id": "hook-session-123"},
+            scratch,
+            vaults_config=config,
+        )
+
+        assert code == 0, stdout
+        data = json.loads(stdout)
+        assert "systemMessage" in data
+        stamp = read_session_start_stamp(
+            plugin_root=PLUGIN_ROOT,
+            desktop_config_path=None,
+            vaults_config_path=config,
+        )
+        assert stamp is not None
+        assert stamp["session_id"] == "hook-session-123"
 
 
 # ---------------------------------------------------------------------------

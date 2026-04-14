@@ -66,6 +66,15 @@ def _resolve_cwd(payload: dict) -> str:
     return ""
 
 
+def _resolve_session_id(payload: dict) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    session_id = payload.get("session_id")
+    if isinstance(session_id, str):
+        return session_id
+    return ""
+
+
 def _resolve_vault() -> str:
     cfg = _config_path()
     if not cfg.exists():
@@ -95,12 +104,15 @@ except Exception:
 
 vault = _resolve_vault()
 cwd = _resolve_cwd(payload)
-sys.stdout.write(vault + "\t" + cwd)
+session_id = _resolve_session_id(payload)
+sys.stdout.write(vault + "\t" + cwd + "\t" + session_id)
 PY
 )"
 
 ACTIVE_VAULT="${RESOLVED%%$'\t'*}"
-CWD_PAYLOAD="${RESOLVED#*$'\t'}"
+REST="${RESOLVED#*$'\t'}"
+CWD_PAYLOAD="${REST%%$'\t'*}"
+SESSION_ID_PAYLOAD="${REST#*$'\t'}"
 
 # ---------------------------------------------------------------------------
 # No active vault → pre-init state. Emit a fallback so the agent knows
@@ -114,8 +126,7 @@ if [ -z "${ACTIVE_VAULT}" ] && [ -n "${CWD_PAYLOAD}" ] && [ -f "${CWD_PAYLOAD}/_
 fi
 
 if [ -z "${ACTIVE_VAULT}" ]; then
-    printf '%s\n' '{"systemMessage": "secondbrain not configured. Run /secondbrain:init to set up."}'
-    exit 0
+    ACTIVE_VAULT="__SECONDBRAIN_UNCONFIGURED__"
 fi
 
 # ---------------------------------------------------------------------------
@@ -160,10 +171,14 @@ fi
 # Delegate to emit_hot_memory.py. It always emits a JSON object and exits 0.
 # ---------------------------------------------------------------------------
 
-if [ -n "${CWD_PAYLOAD}" ]; then
-    python3 "${EMITTER}" --vault "${ACTIVE_VAULT}" --cwd "${CWD_PAYLOAD}"
-else
-    python3 "${EMITTER}" --vault "${ACTIVE_VAULT}"
+EMIT_ARGS=(--vault "${ACTIVE_VAULT}")
+if [ -n "${SESSION_ID_PAYLOAD}" ]; then
+    EMIT_ARGS+=(--session-id "${SESSION_ID_PAYLOAD}")
 fi
+if [ -n "${CWD_PAYLOAD}" ]; then
+    EMIT_ARGS+=(--cwd "${CWD_PAYLOAD}")
+fi
+
+python3 "${EMITTER}" "${EMIT_ARGS[@]}"
 
 exit 0

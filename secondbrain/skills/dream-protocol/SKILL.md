@@ -7,7 +7,7 @@ description: >
   Orchestrates a semantic worker followed by a structural worker so the vault
   ends the run in a fully healthy state.
 metadata:
-  version: "3.5.21"
+  version: "3.5.22"
 ---
 
 # Core Rule
@@ -163,6 +163,21 @@ Phase 7 runs after the commit so the regenerated hot-memory reflects
 the committed state on disk — if we regenerated before committing, the
 hot-memory would snapshot a state the user could never `git log` back
 to.
+
+After the regenerate step succeeds, refresh Cowork compatibility memory and
+quarantine any legacy `memex` leftovers when the run is happening inside a
+Cowork runtime:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/cowork_hygiene.py --repair --vault "${VAULT_PATH}"
+```
+
+**Fail soft.** If the script reports `applicable: false`, continue — that just
+means the run is not happening inside Cowork. If it reports changes, mention
+that compatibility memory was refreshed. If the current session started before
+`secondbrain` was loaded, note that the fix applies only to future startups: a
+`new chat`, `clear`, `compact`, or full Claude restart is still required for
+SessionStart injection to take effect.
 
 # Execution Timing
 

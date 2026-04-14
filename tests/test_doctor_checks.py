@@ -25,11 +25,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / 
 
 import doctor_checks as doctor_module  # pyright: ignore[reportMissingImports]  # noqa: E402
 import setup_steps  # pyright: ignore[reportMissingImports]  # noqa: E402
+from cowork_hygiene import write_session_start_stamp  # type: ignore[reportMissingImports]
 
 from doctor_checks import (  # pyright: ignore[reportMissingImports]
     CheckResult,
     check_core_hooks_path,
     check_cowork_dispatch_bridge,
+    check_cowork_memory_hygiene,
+    check_cowork_runtime_plugin,
+    check_cowork_session_start_stamp,
     check_environment,
     check_hot_memory_schema,
     check_ingest_log_recent_failures,
@@ -915,6 +919,109 @@ class TestCheckCoworkDispatchBridge:
             plugin_root=cowork_runtime["plugin_root"],  # type: ignore[arg-type]
         )
         assert r.status == "pass"
+
+
+# ---------------------------------------------------------------------------
+# Cowork session-start health — runtime plugin load, compatibility memory,
+# and the last session-start stamp.
+# ---------------------------------------------------------------------------
+
+class TestCoworkSessionStartHealth:
+    def _write_audit(self, audit_path: Path, *entries: dict) -> None:
+        audit_path.write_text("".join(json.dumps(entry) + "\n" for entry in entries))
+
+    def test_runtime_plugin_warns_when_latest_init_missed_secondbrain(
+        self,
+        cowork_runtime: dict[str, Path | str],
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv(
+            "SECONDBRAIN_CLAUDE_DESKTOP_CONFIG",
+            str(cowork_runtime["desktop_config_path"]),
+        )
+        self._write_audit(
+            cowork_runtime["audit_path"],  # type: ignore[arg-type]
+            {
+                "type": "system",
+                "subtype": "init",
+                "session_id": "bridge-session",
+                "plugins": [
+                    {"name": "productivity"},
+                    {"name": "cowork-plugin-management"},
+                ],
+                "_audit_timestamp": "2026-04-14T17:24:25.480Z",
+            },
+        )
+
+        r = check_cowork_runtime_plugin(
+            environment="cowork",
+            plugin_root=Path(cowork_runtime["plugin_root"]),
+        )
+
+        assert r.status == "warning"
+        assert "secondbrain" in r.message.lower()
+        assert "fresh" in r.message.lower() or "new chat" in r.message.lower()
+
+    def test_memory_hygiene_fails_fixably_on_memex_and_stale_memory(
+        self,
+        healthy_vault: Path,
+        cowork_runtime: dict[str, Path | str],
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv(
+            "SECONDBRAIN_CLAUDE_DESKTOP_CONFIG",
+            str(cowork_runtime["desktop_config_path"]),
+        )
+        runtime_root = Path(cowork_runtime["app_root"]) / "local-agent-mode-sessions" / str(cowork_runtime["workspace_id"]) / str(cowork_runtime["runtime_session_id"])
+        stale_memory = runtime_root / "agent" / "memory" / "MEMORY.md"
+        stale_memory.parent.mkdir(parents=True, exist_ok=True)
+        stale_memory.write_text("# Memory Index\n\nUse /memex:session-start\n")
+
+        app_root = Path(cowork_runtime["app_root"])  # type: ignore[arg-type]
+        manifest = app_root / "cowork_plugins" / ".install-manifests" / "memex@memex.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text('{\"id\":\"memex@memex\"}')
+
+        r = check_cowork_memory_hygiene(
+            vault_path=healthy_vault,
+            environment="cowork",
+            plugin_root=Path(cowork_runtime["plugin_root"]),
+        )
+
+        assert r.status == "fail"
+        assert r.fixable is True
+        assert r.fix_function == "repair_cowork_hygiene"
+        assert "memex" in r.message.lower() or "memory.md" in r.message.lower()
+
+    def test_session_start_stamp_warns_on_fallback(
+        self,
+        healthy_vault: Path,
+        cowork_runtime: dict[str, Path | str],
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv(
+            "SECONDBRAIN_CLAUDE_DESKTOP_CONFIG",
+            str(cowork_runtime["desktop_config_path"]),
+        )
+        write_session_start_stamp(
+            vault_path=healthy_vault,
+            status="fallback",
+            fallback_reason="hot_memory_missing",
+            session_id="sess-1",
+            plugin_root=Path(cowork_runtime["plugin_root"]),
+            desktop_config_path=Path(cowork_runtime["desktop_config_path"]),
+            hot_memory_generated_at=None,
+        )
+
+        r = check_cowork_session_start_stamp(
+            environment="cowork",
+            plugin_root=Path(cowork_runtime["plugin_root"]),
+            desktop_config_path=Path(cowork_runtime["desktop_config_path"]),
+        )
+
+        assert r.status == "warning"
+        assert "fallback" in r.message.lower() or "missing" in r.message.lower()
+        assert "new chat" in r.message.lower() or "restart" in r.message.lower()
 
 
 # ---------------------------------------------------------------------------

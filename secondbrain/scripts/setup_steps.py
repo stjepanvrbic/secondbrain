@@ -843,9 +843,61 @@ def create_hot_memory_initial(vault_path: Path) -> StepResult:
             error=str(exc),
         )
 
+
     return StepResult(
         success=True,
         message=f"create_hot_memory_initial: wrote {hot_memory}",
+        did_work=True,
+    )
+
+
+def repair_cowork_hygiene(vault_path: Path) -> StepResult:
+    """Repair Cowork compatibility memory and quarantine legacy memex state."""
+    try:
+        from cowork_hygiene import repair_cowork_hygiene as _repair  # type: ignore[reportMissingImports]  # noqa: PLC0415
+    except ImportError as exc:
+        return StepResult(
+            success=False,
+            message="repair_cowork_hygiene: cowork_hygiene not importable",
+            did_work=False,
+            error=str(exc),
+        )
+
+    try:
+        report = _repair(vault_path=vault_path)
+    except Exception as exc:  # noqa: BLE001
+        return StepResult(
+            success=False,
+            message="repair_cowork_hygiene: repair failed",
+            did_work=False,
+            error=str(exc),
+        )
+
+    if not report.applicable:
+        return StepResult(
+            success=True,
+            message="repair_cowork_hygiene: not running inside a Cowork runtime",
+            did_work=False,
+        )
+
+    if not report.changed:
+        return StepResult(
+            success=True,
+            message="repair_cowork_hygiene: Cowork compatibility state already clean",
+            did_work=False,
+        )
+
+    parts = []
+    if report.rewritten_memory_files:
+        parts.append(f"rewrote {len(report.rewritten_memory_files)} MEMORY.md surface(s)")
+    if report.quarantined_paths:
+        parts.append(f"quarantined {len(report.quarantined_paths)} legacy memex artifact(s)")
+    if report.sanitized_registry_files:
+        parts.append(f"sanitized {len(report.sanitized_registry_files)} registry file(s)")
+
+    return StepResult(
+        success=True,
+        message="repair_cowork_hygiene: " + ", ".join(parts),
         did_work=True,
     )
 

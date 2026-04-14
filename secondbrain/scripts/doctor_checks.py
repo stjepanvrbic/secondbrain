@@ -59,6 +59,11 @@ from runtime_resolver import (  # type: ignore[reportMissingImports]
     resolve_obsidian_runtime,
     resolve_vaults_config_path,
 )
+from cowork_hygiene import (  # type: ignore[reportMissingImports]
+    inspect_cowork_hygiene,
+    latest_init_plugins,
+    read_session_start_stamp,
+)
 
 # Ensure sibling modules (setup_steps, connect_mcp_client) are importable.
 # When installed as a plugin, scripts/ is the cwd for hook invocations; when
@@ -438,6 +443,171 @@ def check_cowork_dispatch_bridge(
         details=details,
     )
 
+
+
+
+def check_cowork_runtime_plugin(
+    environment: Optional[str] = None,
+    plugin_root: Optional[Path] = None,
+    desktop_config_path: Optional[Path] = None,
+) -> CheckResult:
+    """Check whether the latest Cowork init event actually loaded secondbrain."""
+    env = environment or _detect_environment()
+    if env != "cowork":
+        return CheckResult(
+            name="cowork_runtime_plugin",
+            status="pass",
+            message="Cowork runtime plugin check not applicable outside Cowork",
+            fixable=False,
+        )
+
+    plugins = latest_init_plugins(plugin_root=plugin_root, desktop_config_path=desktop_config_path)
+    if plugins is None:
+        return CheckResult(
+            name="cowork_runtime_plugin",
+            status="warning",
+            message=(
+                "cannot inspect the latest Cowork init event for this runtime. "
+                "If startup context still looks stale, start a fresh session "
+                "after repairing local compatibility memory."
+            ),
+            fixable=False,
+        )
+
+    lowered = {plugin.lower() for plugin in plugins}
+    if "secondbrain" not in lowered:
+        return CheckResult(
+            name="cowork_runtime_plugin",
+            status="warning",
+            message=(
+                "latest Cowork init did not load secondbrain, so this session "
+                "never received SessionStart state injection. Repair local state, "
+                "then start a fresh session (new chat, clear, compact, or full Claude restart)."
+            ),
+            fixable=False,
+            details={"plugins": plugins},
+        )
+
+    return CheckResult(
+        name="cowork_runtime_plugin",
+        status="pass",
+        message="latest Cowork init loaded secondbrain successfully",
+        fixable=False,
+        details={"plugins": plugins},
+    )
+
+
+def check_cowork_memory_hygiene(
+    vault_path: Path,
+    environment: Optional[str] = None,
+    plugin_root: Optional[Path] = None,
+    desktop_config_path: Optional[Path] = None,
+) -> CheckResult:
+    """Check for stale compatibility MEMORY.md files and legacy memex state."""
+    env = environment or _detect_environment()
+    if env != "cowork":
+        return CheckResult(
+            name="cowork_memory_hygiene",
+            status="pass",
+            message="Cowork memory hygiene check not applicable outside Cowork",
+            fixable=False,
+        )
+
+    report = inspect_cowork_hygiene(
+        vault_path=vault_path,
+        plugin_root=plugin_root,
+        desktop_config_path=desktop_config_path,
+    )
+    if not report.applicable:
+        return CheckResult(
+            name="cowork_memory_hygiene",
+            status="warning",
+            message="cannot resolve the active Cowork runtime to inspect compatibility memory",
+            fixable=False,
+        )
+
+    issues: list[str] = []
+    if report.stale_memory_files:
+        issues.append(f"{len(report.stale_memory_files)} stale compatibility MEMORY.md surface(s)")
+    if report.legacy_artifacts:
+        issues.append(f"{len(report.legacy_artifacts)} legacy memex artifact(s)")
+    if report.registry_files_with_memex:
+        issues.append(f"{len(report.registry_files_with_memex)} Cowork registry file(s) still referencing memex")
+
+    if issues:
+        return CheckResult(
+            name="cowork_memory_hygiene",
+            status="fail",
+            message="Cowork compatibility memory is stale: " + ", ".join(issues),
+            fixable=True,
+            fix_function="repair_cowork_hygiene",
+            details={
+                "stale_memory_files": [str(path) for path in report.stale_memory_files],
+                "legacy_artifacts": [str(path) for path in report.legacy_artifacts],
+                "registry_files_with_memex": [str(path) for path in report.registry_files_with_memex],
+            },
+        )
+
+    return CheckResult(
+        name="cowork_memory_hygiene",
+        status="pass",
+        message="Cowork compatibility memory and marketplace state look clean",
+        fixable=False,
+    )
+
+
+def check_cowork_session_start_stamp(
+    environment: Optional[str] = None,
+    plugin_root: Optional[Path] = None,
+    desktop_config_path: Optional[Path] = None,
+) -> CheckResult:
+    """Check the most recent session-start stamp written by emit_hot_memory.py."""
+    env = environment or _detect_environment()
+    if env != "cowork":
+        return CheckResult(
+            name="cowork_session_start_stamp",
+            status="pass",
+            message="Cowork session-start stamp check not applicable outside Cowork",
+            fixable=False,
+        )
+
+    stamp = read_session_start_stamp(
+        plugin_root=plugin_root,
+        desktop_config_path=desktop_config_path,
+    )
+    if stamp is None:
+        return CheckResult(
+            name="cowork_session_start_stamp",
+            status="warning",
+            message=(
+                "no SessionStart stamp found for this runtime. If state injection was just repaired, "
+                "start a fresh session (new chat, clear, compact, or full Claude restart)."
+            ),
+            fixable=False,
+        )
+
+    status = stamp.get("status")
+    if status != "success":
+        reason = str(stamp.get("fallback_reason") or "unknown fallback")
+        return CheckResult(
+            name="cowork_session_start_stamp",
+            status="warning",
+            message=(
+                f"latest SessionStart stamp recorded a fallback ({reason}). "
+                "Repair local state if needed, then start a fresh session (new chat, clear, compact, or full Claude restart)."
+            ),
+            fixable=False,
+            details=stamp,
+        )
+
+    timestamp = stamp.get("timestamp")
+    return CheckResult(
+        name="cowork_session_start_stamp",
+        status="pass",
+        message=f"latest SessionStart stamp succeeded at {timestamp}",
+        fixable=False,
+        details=stamp,
+    )
 
 def check_plugin_root(plugin_root: Optional[Path] = None) -> CheckResult:
     """Check 1: resolve the plugin root from env or the current doctor runtime."""
@@ -1876,6 +2046,20 @@ def run_all_checks(
             desktop_config_path=desktop_config_path,
         )
     )
+    results.append(
+        check_cowork_runtime_plugin(
+            environment=env,
+            plugin_root=plugin_root,
+            desktop_config_path=desktop_config_path,
+        )
+    )
+    results.append(
+        check_cowork_session_start_stamp(
+            environment=env,
+            plugin_root=plugin_root,
+            desktop_config_path=desktop_config_path,
+        )
+    )
     api_key_result = check_obsidian_api_key(
         environment=env,
         desktop_config_path=desktop_config_path,
@@ -1954,7 +2138,7 @@ def run_all_checks(
         for name in (
             "manifest", "log_md", "profile", "standard_folders",
             "scheduled_tasks", "last_dream_protocol_run",
-            "hot_memory_schema", "ingest_log_recent_failures",
+            "hot_memory_schema", "cowork_memory_hygiene", "ingest_log_recent_failures",
             "vault_verification", "legacy_claude_md", "plugin_version_mismatch",
         ):
             results.append(CheckResult(
@@ -1977,6 +2161,15 @@ def run_all_checks(
 
         # Phase 3 deferred check
         results.append(check_hot_memory_schema(vault_path, plugin_root))
+
+        results.append(
+            check_cowork_memory_hygiene(
+                vault_path=vault_path,
+                environment=env,
+                plugin_root=plugin_root,
+                desktop_config_path=desktop_config_path,
+            )
+        )
 
         # Phase 2/3 deferred check
         results.append(check_ingest_log_recent_failures(vault_path))
@@ -2026,6 +2219,7 @@ def run_fixable_treatments(
         "write_vault_id": 0,
         "add_vault_to_config": 1,
         "create_hot_memory_initial": 2,
+        "repair_cowork_hygiene": 3,
     }
     pending_results = sorted(
         (

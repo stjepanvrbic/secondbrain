@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -46,6 +47,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from cowork_hygiene import write_session_start_stamp  # type: ignore[reportMissingImports]
 from hot_memory_schema import validate  # type: ignore[reportMissingImports]
 from vault_lookup_cwd import (  # type: ignore[reportMissingImports]
     build_active_project_section,
@@ -94,6 +96,40 @@ def _log_err(msg: str) -> None:
     sys.stderr.write("emit_hot_memory: " + msg + "\n")
 
 
+def _extract_generated_at(content: str) -> Optional[str]:
+    in_frontmatter = False
+    for line in content.splitlines():
+        if line.strip() == "---":
+            if not in_frontmatter:
+                in_frontmatter = True
+                continue
+            break
+        if in_frontmatter and line.startswith("generated_at:"):
+            return line.split(":", 1)[1].strip() or None
+    return None
+
+
+def _write_stamp(
+    vault_path: Path,
+    status: str,
+    fallback_reason: Optional[str],
+    session_id: Optional[str],
+    hot_memory_generated_at: Optional[str],
+) -> None:
+    plugin_root = Path(os.environ["CLAUDE_PLUGIN_ROOT"]).expanduser() if os.environ.get("CLAUDE_PLUGIN_ROOT") else None
+    try:
+        write_session_start_stamp(
+            vault_path=vault_path,
+            status=status,
+            fallback_reason=fallback_reason,
+            session_id=session_id,
+            plugin_root=plugin_root,
+            hot_memory_generated_at=hot_memory_generated_at,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log_err("session-start stamp failed: " + str(exc))
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -110,6 +146,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--vault",
         required=True,
         help="Absolute path to the vault root.",
+    )
+    parser.add_argument(
+        "--session-id",
+        required=False,
+        default=None,
+        help="Optional Claude session identifier for session-start stamping.",
     )
     parser.add_argument(
         "--cwd",
@@ -129,12 +171,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     vault_path = Path(args.vault).expanduser()
     if not vault_path.is_dir():
         _log_err("vault path does not exist: " + str(vault_path))
+        _write_stamp(vault_path, "fallback", "vault_not_configured", args.session_id, None)
         _emit(FALLBACK_NOT_CONFIGURED)
         return 0
 
     hot_memory_path = vault_path / HOT_MEMORY_RELATIVE
     if not hot_memory_path.is_file():
         _log_err("hot-memory missing at " + str(hot_memory_path))
+        _write_stamp(vault_path, "fallback", "hot_memory_missing", args.session_id, None)
         _emit(FALLBACK_HOT_MEMORY_MISSING)
         return 0
 
@@ -142,6 +186,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         content = hot_memory_path.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         _log_err("cannot read hot-memory: " + str(exc))
+        _write_stamp(vault_path, "fallback", "hot_memory_read_error", args.session_id, None)
         _emit(FALLBACK_GENERIC_ERROR)
         return 0
 
@@ -151,6 +196,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "hot-memory failed validation: "
             + "; ".join(result.errors[:3])
         )
+        _write_stamp(vault_path, "fallback", "hot_memory_invalid", args.session_id, None)
         _emit(FALLBACK_HOT_MEMORY_INVALID)
         return 0
 
@@ -168,6 +214,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if section:
             message = message.rstrip() + "\n" + section.rstrip() + "\n"
 
+    _write_stamp(vault_path, "success", None, args.session_id, _extract_generated_at(content))
     _emit(message)
     return 0
 

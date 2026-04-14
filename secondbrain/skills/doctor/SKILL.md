@@ -8,7 +8,7 @@ description: >
   reports results, and ONLY on the user's next-turn confirmation invokes
   the treatment phase (Phase 2) for bootstrap fixes. Phase 1 never mutates anything.
 metadata:
-  version: "3.5.21"
+  version: "3.5.22"
 ---
 
 # Core Rule
@@ -126,6 +126,7 @@ question, and then **STOP**.
 | `standard_folders` (Check 11, folders missing) | `setup_vault_scaffolding` |
 | `vault_identity_cross` (marker present but missing `vault_id` field) | `write_vault_id` |
 | `vaults_config` (Check 0, vaults.json missing/broken) | `add_vault_to_config` |
+| `cowork_memory_hygiene` (stale compatibility `MEMORY.md`, legacy `memex` artifacts) | `repair_cowork_hygiene` |
 
 **Escalation-only (doctor CANNOT fix — tell the user):**
 
@@ -147,6 +148,8 @@ question, and then **STOP**.
 | `vault_verification` (Check 18) | run `/secondbrain:dream-protocol` to fix vault errors (wikilinks, inbox archiving, orphans) |
 | `legacy_claude_md` (Check 19, warning) | delete or archive `CLAUDE.md` at vault root — deprecated since v3.3.3, may pollute agent context |
 | `plugin_version_mismatch` (Check 20, warning) | in Cowork, remove and reinstall the plugin from the marketplace |
+| `cowork_runtime_plugin` (Cowork warning) | the latest Cowork startup did not load `secondbrain`; repair local state if needed, then start a fresh session (`new chat`, `clear`, `compact`, or full Claude restart) |
+| `cowork_session_start_stamp` (Cowork warning) | the latest SessionStart fell back or no stamp exists; after repair, start a fresh session (`new chat`, `clear`, `compact`, or full Claude restart`) |
 | `cowork_dispatch_bridge` (Cowork warning) | fully quit Claude Desktop, back up `~/Library/Application Support/Claude/bridge-state.json` and `~/Library/Application Support/Claude/local-agent-mode-sessions/`, clear or rename them, relaunch Claude Desktop, then retry dispatch |
 
 # Phase 2 — Treat (Turn 2, ONLY on confirmation)
@@ -165,7 +168,11 @@ On confirmation:
 3. Read the CLI's stdout and report to the user: which fixes ran, which
    succeeded, which failed, and the new diagnostic state.
 4. For any remaining failures after Phase 2, escalate to the user with
-   the appropriate manual action from the escalation table above.
+   the appropriate manual action from the escalation table above. If
+   `cowork_memory_hygiene` was fixed, explicitly tell the user that the
+   current session does NOT retroactively gain SessionStart context —
+   they still need a fresh startup event (`new chat`, `clear`, `compact`,
+   or full Claude restart`).
 5. If `vault_verification` reported errors or warnings, ask the user:
    "Vault has N remaining verification issues. Want me to run Dream Protocol
    to repair the vault and drive it to a clean verification state?" On confirmation,

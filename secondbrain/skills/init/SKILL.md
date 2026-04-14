@@ -12,7 +12,7 @@ description: >
   Supports a `--verify` mode that runs verification only (no creates,
   no installs) for diagnosing existing installs.
 metadata:
-  version: "3.5.21"
+  version: "3.5.22"
 ---
 
 # Core Rule
@@ -483,6 +483,14 @@ python3 -c "import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/scripts'); fro
 
 Print the returned message. If the call fails, surface the error and continue — the first dream-protocol run will regenerate the file via `update_hot_memory.py --regenerate`, so this is a soft fallback rather than a hard blocker.
 
+Immediately after seeding hot-memory, refresh Cowork compatibility memory if init is running inside Cowork:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/cowork_hygiene.py --repair --vault "${VAULT_PATH}"
+```
+
+If the script reports `applicable: false`, continue — that just means init is not running inside Cowork. If it reports changes, tell the user the compatibility `MEMORY.md` surfaces were refreshed and that the current session still will NOT gain SessionStart context retroactively. A `new chat`, `clear`, `compact`, or full Claude restart is required after init/install for startup injection to take effect.
+
 ---
 
 # Step 4a — Vault git tracking
@@ -779,7 +787,17 @@ Invoke `/secondbrain:dream-protocol` to consolidate the vault:
 - Repairs wikilinks
 - Appends a log entry
 
-## 7d. Final verification
+## 7d. Refresh Cowork compatibility memory
+
+After `/secondbrain:dream-protocol` completes, run the shared Cowork hygiene repair once more so the compatibility `MEMORY.md` surfaces and legacy marketplace state match the now-clean vault:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/cowork_hygiene.py --repair --vault "${VAULT_PATH}"
+```
+
+If the script reports `applicable: false`, continue. If it reports changes, tell the user the local Cowork state was refreshed and remind them that existing already-open sessions still need a fresh startup event (`new chat`, `clear`, `compact`, or full Claude restart`) before SessionStart injection reflects the repaired state.
+
+## 7e. Final verification
 
 Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify_vault.py "${VAULT_PATH}" --json` one last time.
 Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vault_guide.py "${VAULT_PATH}"` to get the vault summary.

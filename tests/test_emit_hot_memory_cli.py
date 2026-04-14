@@ -15,6 +15,7 @@ contracts end-to-end.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,15 +27,17 @@ EMIT_HOT_MEMORY_SCRIPT = (
 
 sys.path.insert(0, str(REPO_ROOT / "secondbrain" / "scripts"))
 
+from cowork_hygiene import read_session_start_stamp  # type: ignore[reportMissingImports]
 from hot_memory_schema import INITIAL_TEMPLATE  # type: ignore[reportMissingImports]
 
 
-def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+def _run_cli(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(EMIT_HOT_MEMORY_SCRIPT), *args],
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
 
 
@@ -47,6 +50,34 @@ def _make_vault(tmp_path: Path, hot_memory_body: str | None = None) -> Path:
     if hot_memory_body is not None:
         (vault / "brain" / "hot-memory.md").write_text(hot_memory_body)
     return vault
+
+
+def _make_cowork_runtime(tmp_path: Path) -> dict[str, Path]:
+    app_root = tmp_path / "Claude"
+    app_root.mkdir()
+    desktop_config_path = app_root / "claude_desktop_config.json"
+    desktop_config_path.write_text(json.dumps({"mcpServers": {}}))
+
+    plugin_root = (
+        app_root
+        / "local-agent-mode-sessions"
+        / "workspace-123"
+        / "session-456"
+        / "rpm"
+        / "plugin_test"
+        / "secondbrain"
+    )
+    (plugin_root / ".claude-plugin").mkdir(parents=True)
+    (plugin_root / "scripts").mkdir(parents=True, exist_ok=True)
+    (plugin_root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "secondbrain", "version": "3.5.21"})
+    )
+
+    return {
+        "app_root": app_root,
+        "desktop_config_path": desktop_config_path,
+        "plugin_root": plugin_root,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +168,49 @@ class TestInvalidHotMemory:
         obj = json.loads(r.stdout)
         assert isinstance(obj, dict)
         assert "systemMessage" in obj
+
+
+
+
+class TestSessionStartStamp:
+    def test_success_writes_runtime_stamp(self, tmp_path: Path):
+        vault = _make_vault(tmp_path, INITIAL_TEMPLATE)
+        runtime = _make_cowork_runtime(tmp_path)
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(runtime["plugin_root"])
+        env["SECONDBRAIN_CLAUDE_DESKTOP_CONFIG"] = str(runtime["desktop_config_path"])
+
+        r = _run_cli("--vault", str(vault), "--session-id", "session-start-abc", env=env)
+
+        assert r.returncode == 0, r.stderr
+        stamp = read_session_start_stamp(
+            plugin_root=runtime["plugin_root"],
+            desktop_config_path=runtime["desktop_config_path"],
+        )
+        assert stamp is not None
+        assert stamp["status"] == "success"
+        assert stamp["session_id"] == "session-start-abc"
+        assert stamp["vault_path"] == str(vault)
+        assert stamp["hot_memory_generated_at"]
+
+    def test_fallback_writes_runtime_stamp(self, tmp_path: Path):
+        vault = _make_vault(tmp_path, None)
+        runtime = _make_cowork_runtime(tmp_path)
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(runtime["plugin_root"])
+        env["SECONDBRAIN_CLAUDE_DESKTOP_CONFIG"] = str(runtime["desktop_config_path"])
+
+        r = _run_cli("--vault", str(vault), "--session-id", "session-start-missing", env=env)
+
+        assert r.returncode == 0, r.stderr
+        stamp = read_session_start_stamp(
+            plugin_root=runtime["plugin_root"],
+            desktop_config_path=runtime["desktop_config_path"],
+        )
+        assert stamp is not None
+        assert stamp["status"] == "fallback"
+        assert stamp["fallback_reason"] == "hot_memory_missing"
+        assert stamp["session_id"] == "session-start-missing"
 
 
 # ---------------------------------------------------------------------------
