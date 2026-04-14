@@ -6,7 +6,7 @@ description: >
   Lightweight urgency scan — categorizes tasks by deadline proximity, auto-promotes
   urgent items, writes findings to status. Scheduled task only.
 metadata:
-  version: "3.5.24"
+  version: "3.5.25"
 ---
 
 # Core Rule
