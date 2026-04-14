@@ -540,6 +540,80 @@ def add_vault_to_config(
     )
 
 
+def register_vault_from_marker(
+    vault_path: Path,
+    *,
+    role: str = "personal",
+    with_push: bool = False,
+) -> StepResult:
+    """Register a vault in vaults.json using the in-vault install marker.
+
+    This is the recovery path for partial init runs: if the vault marker
+    exists but `~/.config/secondbrain/vaults.json` was never written, we
+    can reconstruct the missing global config entry from local vault state.
+
+    If the marker exists but lacks a valid `vault_id`, we repair it via
+    `write_vault_id()` first, then register the vault.
+    """
+    marker_result = write_vault_id(vault_path)
+    if not marker_result.success:
+        return StepResult(
+            success=False,
+            message=f"register_vault_from_marker: {marker_result.message}",
+            did_work=marker_result.did_work,
+            error=marker_result.error,
+        )
+
+    marker = vault_path / ".secondbrain-installed"
+    try:
+        data = json.loads(marker.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return StepResult(
+            success=False,
+            message=f"register_vault_from_marker: could not parse {marker}",
+            did_work=marker_result.did_work,
+            error=str(exc),
+        )
+
+    if not isinstance(data, dict):
+        return StepResult(
+            success=False,
+            message="register_vault_from_marker: marker is not a JSON object",
+            did_work=marker_result.did_work,
+            error="expected JSON object at top level",
+        )
+
+    vault_id = data.get("vault_id")
+    if not isinstance(vault_id, str) or not vault_id:
+        return StepResult(
+            success=False,
+            message="register_vault_from_marker: marker has no vault_id",
+            did_work=marker_result.did_work,
+            error="missing vault_id in marker",
+        )
+
+    config_result = add_vault_to_config(
+        vault_path=vault_path,
+        vault_id=vault_id,
+        name=vault_path.name,
+        role=role,
+        with_push=with_push,
+    )
+    if not config_result.success:
+        return StepResult(
+            success=False,
+            message=f"register_vault_from_marker: {config_result.message}",
+            did_work=marker_result.did_work or config_result.did_work,
+            error=config_result.error,
+        )
+
+    return StepResult(
+        success=True,
+        message=f"register_vault_from_marker: {config_result.message}",
+        did_work=marker_result.did_work or config_result.did_work,
+    )
+
+
 def remove_vault_from_config(vault_id: str) -> StepResult:
     """Remove a vault entry. If it was the active vault, reassign active to
     the first remaining entry (or None if the list is now empty).

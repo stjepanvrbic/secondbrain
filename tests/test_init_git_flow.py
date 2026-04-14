@@ -176,6 +176,23 @@ class TestScriptReferences:
         )
 
 
+class TestWithPushPersistence:
+    def test_step_4a_5_uses_marker_based_registration_helper(self):
+        content = _content()
+        assert "register_vault_from_marker" in content, (
+            "Step 4a.5 must use a helper that reconstructs vault registration "
+            "from the marker so partial init runs can recover when vaults.json "
+            "does not exist yet."
+        )
+
+    def test_step_4a_5_does_not_filter_preexisting_entries(self):
+        content = _content()
+        assert "entries = [v for v in list_configured_vaults()" not in content, (
+            "Step 4a.5 must not depend on a pre-existing vaults.json entry. "
+            "That turns partial init recovery into a silent no-op."
+        )
+
+
 class TestForbiddenAction:
     def test_never_push_without_confirmation(self):
         content = _content()

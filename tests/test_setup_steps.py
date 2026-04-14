@@ -25,6 +25,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "secondbrain" / "scripts"))
 
+import setup_steps as setup_steps_module  # type: ignore[reportMissingImports]
 from setup_steps import (  # type: ignore[reportMissingImports]
     StepResult,
     VaultEntry,
@@ -209,6 +210,57 @@ class TestWriteVaultId:
         assert parsed.version == 4
         # Also a string, not bytes
         assert isinstance(data["vault_id"], str)
+
+
+# ---------------------------------------------------------------------------
+# register_vault_from_marker
+# ---------------------------------------------------------------------------
+
+class TestRegisterVaultFromMarker:
+    def test_creates_config_from_marker_only_state(
+        self,
+        isolated_config: Path,
+        vault_with_marker: Path,
+    ):
+        result = setup_steps_module.register_vault_from_marker(
+            vault_with_marker,
+            with_push=True,
+        )
+
+        assert result.success is True
+        assert result.did_work is True
+        data = json.loads(isolated_config.read_text())
+        entry = data["vaults"][0]
+        marker = json.loads((vault_with_marker / ".secondbrain-installed").read_text())
+        assert data["active_vault_id"] == marker["vault_id"]
+        assert entry["id"] == marker["vault_id"]
+        assert entry["path"] == str(vault_with_marker.resolve())
+        assert entry["name"] == vault_with_marker.name
+        assert entry["with_push"] is True
+
+    def test_repairs_missing_vault_id_before_registering(
+        self,
+        isolated_config: Path,
+        vault_with_marker: Path,
+    ):
+        result = setup_steps_module.register_vault_from_marker(vault_with_marker)
+
+        assert result.success is True
+        marker = json.loads((vault_with_marker / ".secondbrain-installed").read_text())
+        data = json.loads(isolated_config.read_text())
+        assert "vault_id" in marker
+        assert data["vaults"][0]["id"] == marker["vault_id"]
+
+    def test_fails_when_marker_missing(self, isolated_config: Path, tmp_path: Path):
+        vault = tmp_path / "vault-without-marker"
+        vault.mkdir()
+
+        result = setup_steps_module.register_vault_from_marker(vault)
+
+        assert result.success is False
+        assert result.did_work is False
+        assert not isolated_config.exists()
+        assert "marker" in result.message.lower() or "marker" in (result.error or "").lower()
 
 
 # ---------------------------------------------------------------------------

@@ -594,10 +594,10 @@ Which one? (1, 2, or 3)
 Whether or not the user enabled a remote, record the final `with_push` value in `~/.config/secondbrain/vaults.json` so T9's Stop hook knows whether to push after every commit:
 
 ```bash
-python3 -c "import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/scripts'); from setup_steps import add_vault_to_config, list_configured_vaults; from pathlib import Path; entries = [v for v in list_configured_vaults() if v.path == str(Path('${VAULT_PATH}').resolve())]; [add_vault_to_config(Path(v.path), v.id, v.name, v.role, with_push=${WITH_PUSH}) for v in entries]"
+python3 -c "import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/scripts'); from setup_steps import register_vault_from_marker; from pathlib import Path; r = register_vault_from_marker(Path('${VAULT_PATH}'), with_push=${WITH_PUSH}); print(r.message); sys.exit(0 if r.success else 1)"
 ```
 
-Where `${WITH_PUSH}` is the literal Python boolean `True` or `False`. This is a simple idempotent update — add_vault_to_config takes care of the compare-and-write.
+Where `${WITH_PUSH}` is the literal Python boolean `True` or `False`. This helper is the partial-init recovery path: it reconstructs the vaults.json entry from `${VAULT_PATH}/.secondbrain-installed` when the config is missing, and still acts as a simple idempotent update on re-runs.
 
 Print: `Git tracking enabled (remote: yes/no, auto-push: yes/no).`
 
