@@ -53,6 +53,23 @@ def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess:
     )
 
 
+def _strip_git_identity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Match the blank-identity environment Cowork can expose to git."""
+    home = tmp_path / "isolated-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("EMAIL", raising=False)
+    for key in (
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+    ):
+        monkeypatch.setenv(key, "")
+
+
 @pytest.fixture
 def empty_vault(tmp_path: Path) -> Path:
     """A plain directory with a couple of files — no git yet."""
@@ -107,6 +124,23 @@ class TestSetupGitFreshVault:
         # downstream log consumers can identify the step.
         assert result.success is True
         assert len(result.message) > 0
+
+    def test_succeeds_without_global_git_identity(
+        self,
+        empty_vault: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
+        _strip_git_identity(monkeypatch, tmp_path)
+
+        result = setup_git(empty_vault)
+
+        assert result.success is True
+        assert result.did_work is True
+        assert not (empty_vault / ".git" / "index.lock").exists()
+        cp = _git("log", "-1", "--format=%s", cwd=empty_vault)
+        assert cp.returncode == 0
+        assert cp.stdout.strip() == "Initial secondbrain vault scaffolding"
 
 
 # ---------------------------------------------------------------------------
