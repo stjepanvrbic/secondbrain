@@ -69,11 +69,11 @@ The actual release mutation happens in GitHub Actions after the push lands on `m
 1. `Auto Release Main` computes the next patch version from the latest semver tag.
 2. It rewrites `plugin.json`, `marketplace.json`, `release.json`, and all skill frontmatter in one bot-authored release commit.
 3. It creates the annotated `vX.Y.Z` tag on that release commit and pushes both back to `main`.
-4. `Publish Release` builds `secondbrain-vX.Y.Z.zip`, validates it, uploads it to GitHub Releases, then downloads the published asset and validates the real uploaded artifact again.
+4. The same `Auto Release Main` run builds `secondbrain-vX.Y.Z.zip`, validates it, publishes it to GitHub Releases, then downloads the published asset and validates the real uploaded artifact again.
 
-`push.followTags` is still configured automatically via `install_git_hooks.py`, but contributors do not need to create tags manually for normal releases.
+`push.followTags` is still configured automatically via `install_git_hooks.py`, but contributors do not need to create tags manually for normal releases. The separate `Publish Release` workflow remains available for direct/manual semver tag pushes; automatic main-branch releases do not depend on that follow-on trigger.
 
-**Why this matters:** Cowork's server-managed marketplace relies on git tags and GitHub releases to detect plugin updates. The repository now guarantees those artifacts are created automatically from `main`, and the shipped runtime identity is tracked explicitly in `secondbrain/.claude-plugin/release.json`.
+**Why this matters:** Cowork's server-managed marketplace relies on git tags and GitHub releases to detect plugin updates. The repository now guarantees those artifacts are created automatically from `main`, and the shipped runtime identity is tracked explicitly in `secondbrain/.claude-plugin/release.json` using the release tag plus the source commit that produced that release.
 
 ### Release verification checklist
 

@@ -29,7 +29,7 @@ def test_auto_release_workflow_triggers_on_pushes_to_main():
     assert "main" in text
 
 
-def test_auto_release_workflow_skips_bot_release_loops_and_tags_main():
+def test_auto_release_workflow_skips_bot_release_loops_and_publishes_release():
     text = AUTO_RELEASE_WORKFLOW.read_text(encoding="utf-8")
     assert "github-actions[bot]" in text or "release:" in text, (
         "auto-release must skip the follow-up push it creates itself"
@@ -41,6 +41,15 @@ def test_auto_release_workflow_skips_bot_release_loops_and_tags_main():
     )
     assert "bump_version.py" in text, (
         "workflow must rewrite version-managed files through bump_version.py"
+    )
+    assert "gh release create" in text or "gh release edit" in text, (
+        "auto-release must publish the GitHub release itself because bot-created tags do not trigger downstream workflows"
+    )
+    assert "gh release upload" in text, (
+        "auto-release must upload the installable release asset on the same run that creates the tag"
+    )
+    assert "gh release download" in text, (
+        "auto-release must validate the published release asset, not just the locally built zip"
     )
 
 

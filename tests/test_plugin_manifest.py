@@ -219,7 +219,7 @@ class TestVersionConsistency:
             "release.json releaseAssetName must stay aligned with the published GitHub asset name"
         )
 
-    def test_release_json_commit_matches_tag_when_tag_exists(self):
+    def test_release_json_commit_is_stable_git_sha_when_present(self):
         release = load_json(RELEASE_JSON)
         tag = release["gitTag"]
         tag_exists = subprocess.run(
@@ -228,12 +228,13 @@ class TestVersionConsistency:
         ).stdout.strip()
         assert tag_exists, f"release.json points at missing tag {tag!r}"
 
-        tag_commit = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "rev-list", "-n", "1", tag],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        assert release.get("gitCommit") == tag_commit, (
-            f"release.json gitCommit {release.get('gitCommit')!r} != commit for {tag} ({tag_commit})"
+        git_commit = release.get("gitCommit")
+        assert isinstance(git_commit, str), "release.json gitCommit must be a string"
+        assert len(git_commit) == 40, (
+            f"release.json gitCommit {git_commit!r} must be a full git SHA for the source commit that produced the release"
+        )
+        assert all(ch in "0123456789abcdef" for ch in git_commit), (
+            f"release.json gitCommit {git_commit!r} must be lowercase hexadecimal"
         )
 
     def test_version_is_not_behind_latest_release_tag(self):
