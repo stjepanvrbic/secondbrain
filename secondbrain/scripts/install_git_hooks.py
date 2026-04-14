@@ -95,9 +95,9 @@ def install() -> int:
     relative = str(HOOKS_DIR.relative_to(REPO_ROOT))
     git("config", "core.hooksPath", relative)
 
-    # Ensure `git push` carries annotated tags automatically. Without this,
-    # tags created by `bump_version.py --release` stay local and Cowork's
-    # server-managed marketplace never sees them.
+    # Ensure `git push` carries annotated tags automatically. The normal
+    # release path tags in GitHub Actions, but contributors still need
+    # follow-tags for any explicit maintenance tags they create locally.
     git("config", "push.followTags", "true")
 
     # Make sure every expected hook is executable (matters after a fresh clone

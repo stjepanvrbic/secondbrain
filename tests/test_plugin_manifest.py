@@ -10,7 +10,7 @@ Checks:
     - Every command uses ${CLAUDE_PLUGIN_ROOT} (no hardcoded paths)
     - Every script in scripts/ is referenced by hooks, docs, or allowlisted
     - No stray .DS_Store / __pycache__ / *.pyc inside anything the installer ships
-    - Plugin version is strictly greater than the last released git tag
+    - Shipped runtime identity stays in lockstep with the tagged release metadata
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ PLUGIN_ROOT = REPO_ROOT / "secondbrain"                  # shipped plugin source
 
 MARKETPLACE_JSON = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 PLUGIN_JSON = PLUGIN_ROOT / ".claude-plugin" / "plugin.json"
+RELEASE_JSON = PLUGIN_ROOT / ".claude-plugin" / "release.json"
 HOOKS_JSON = PLUGIN_ROOT / "hooks" / "hooks.json"
 SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 HOOKS_DIR = PLUGIN_ROOT / "hooks"
@@ -45,7 +46,7 @@ CLI_ENTRYPOINT_ALLOWLIST = {
     "install_git_hooks.py",    # dev-only: documented in repo-root CONTRIBUTING.md
     "lifecycle_ingest.py",     # hook orchestration helper used by shell wrappers
     "run_ingester_job.py",     # detached ingester runner used by lifecycle_ingest.py
-    "release_workflow.py",     # pure release-state planner used by pre-push
+    "auto_release.py",        # dev-only: main-branch auto release helper used by GitHub Actions
     "validate_distribution.py",  # dev-only: release ZIP + local Claude install smoke validator
     "setup_steps.py",          # library-only: imported by init + doctor (wired up in T3/T6)
     "connect_mcp_client.py",   # library-only: imported by dream/hot-memory/doctor (wired up in T10/T11/T13/T14)
@@ -199,64 +200,56 @@ class TestVersionConsistency:
         for p in parts:
             assert p.isdigit(), f"version component {p!r} is not numeric"
 
-    def test_version_tag_relationship(self):
-        """Version tag must point at HEAD, or version must be greater than last tag.
+    def test_release_json_exists_and_matches_plugin_version(self):
+        release = load_json(RELEASE_JSON)
+        plugin = load_json(PLUGIN_JSON)
+        plugin_version = plugin["version"]
+        assert release.get("schemaVersion") == 1, (
+            "release.json must declare schemaVersion 1 so runtime identity parsing "
+            "stays stable across marketplace, installed-runtime, and mounted-session checks."
+        )
+        assert release.get("pluginVersion") == plugin_version, (
+            f"release.json pluginVersion {release.get('pluginVersion')!r} != "
+            f"plugin.json version {plugin_version!r}. bump_version.py must keep them aligned."
+        )
+        assert release.get("gitTag") == f"v{plugin_version}", (
+            "release.json gitTag must stay aligned with the shipped plugin version"
+        )
+        assert release.get("releaseAssetName") == f"secondbrain-v{plugin_version}.zip", (
+            "release.json releaseAssetName must stay aligned with the published GitHub asset name"
+        )
 
-        The pre-push hook auto-bumps whenever HEAD moves past a tag. So the
-        only valid states at push time are:
-          1. Tag v{version} exists and points directly at HEAD (we ARE the release)
-          2. No tag for current version, but version > last tag (pre-bump state
-             that the hook will fix before push completes)
+    def test_release_json_commit_matches_tag_when_tag_exists(self):
+        release = load_json(RELEASE_JSON)
+        tag = release["gitTag"]
+        tag_exists = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "tag", "-l", tag],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        assert tag_exists, f"release.json points at missing tag {tag!r}"
 
-        "Tag is an ancestor of HEAD" is NOT valid — it means there's unreleased
-        code and the hook should have bumped. This test enforces the same
-        invariant as the hook.
-        """
+        tag_commit = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-list", "-n", "1", tag],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        assert release.get("gitCommit") == tag_commit, (
+            f"release.json gitCommit {release.get('gitCommit')!r} != commit for {tag} ({tag_commit})"
+        )
+
+    def test_version_is_not_behind_latest_release_tag(self):
         mj = load_json(MARKETPLACE_JSON)
         current_str = mj["plugins"][0]["version"]
         current = parse_semver(current_str)
-        expected_tag = f"v{current_str}"
-
-        tag_exists = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "tag", "-l", expected_tag],
+        tags = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "tag", "-l", "v*", "--sort=-v:refname"],
             capture_output=True, text=True, check=True,
-        ).stdout.strip()
-
-        if tag_exists:
-            # Tag exists — it MUST point at HEAD, not just be an ancestor
-            tag_commit = subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "rev-list", "-n", "1", expected_tag],
-                capture_output=True, text=True, check=True,
-            ).stdout.strip()
-            head_commit = subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
-                capture_output=True, text=True, check=True,
-            ).stdout.strip()
-            assert tag_commit == head_commit, (
-                f"tag {expected_tag} exists but points at {tag_commit[:8]}, not "
-                f"HEAD ({head_commit[:8]}). HEAD has moved past the release — "
-                f"the pre-push hook should auto-bump on next push."
-            )
-            return
-
-        # No matching tag — version must be strictly greater than the last tag
-        try:
-            last_tag = subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "describe", "--tags", "--abbrev=0"],
-                capture_output=True, text=True, check=True,
-            ).stdout.strip()
-        except subprocess.CalledProcessError as exc:
-            raise AssertionError("repo must have at least one release tag") from exc
-        assert last_tag, "repo must have at least one release tag"
-        tag_clean = last_tag.lstrip("v")
-        try:
-            tag_version = parse_semver(tag_clean)
-        except (ValueError, IndexError) as exc:
-            raise AssertionError(f"last tag {last_tag!r} must be semver") from exc
-        assert current > tag_version, (
-            f"plugin.json version {current_str} has no matching tag and is not "
-            f"strictly greater than last tag {last_tag} — "
-            f"the pre-push hook should auto-bump on next push."
+        ).stdout.splitlines()
+        latest_semver = next((tag for tag in tags if re.fullmatch(r"v\d+\.\d+\.\d+", tag)), None)
+        assert latest_semver, "repo must have at least one semver release tag"
+        latest = parse_semver(latest_semver.lstrip("v"))
+        assert current >= latest, (
+            f"plugin version {current_str} is behind latest release tag {latest_semver}. "
+            f"The source tree must never advertise an older runtime identity than the latest release."
         )
 
 

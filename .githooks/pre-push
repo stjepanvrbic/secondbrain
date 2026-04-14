@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 #
-# pre-push: refuse to push unless the plugin is release-ready.
+# pre-push: refuse to push unless the plugin is validation-clean.
 
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 PLUGIN_ROOT="$REPO_ROOT/secondbrain"
 BUMP_SCRIPT="$PLUGIN_ROOT/scripts/bump_version.py"
-RELEASE_WORKFLOW="$PLUGIN_ROOT/scripts/release_workflow.py"
 TESTS_DIR="$REPO_ROOT/tests"
 
 red()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
@@ -25,116 +24,31 @@ fail() {
     exit 1
 }
 
-is_semver_tag() {
-    [[ "${1:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-}
-
-latest_local_semver_tag() {
-    git tag -l 'v*' --sort=-v:refname | while read -r tag; do
-        if is_semver_tag "$tag"; then
-            printf '%s\n' "$tag"
-            break
-        fi
-    done
-}
-
-prune_local_semver_tags() {
-    local keep_tag="$1"
-    local old
-    while read -r old; do
-        if [ -n "$old" ] && is_semver_tag "$old" && [ "$old" != "$keep_tag" ]; then
-            git tag -d "$old" >/dev/null 2>&1 || true
-        fi
-    done < <(git tag -l 'v*')
-}
-
 command -v python3 >/dev/null 2>&1 || fail "python3 not on PATH"
 PYTEST_BIN="$(command -v pytest || true)"
-[ -n "$PYTEST_BIN" ] || fail "pytest not on PATH" \
-    "Activate the project environment that provides pytest and retry."
+[ -n "$PYTEST_BIN" ] || fail "pytest not on PATH" "Activate the project environment that provides pytest and retry."
 
-bold "pre-push: full health check starting"
+bold "pre-push: validation gate starting"
 
 bold "pre-push: [1/4] version consistency check"
 if ! python3 "$BUMP_SCRIPT" --check; then
-    fail "version files are inconsistent" \
-        "Fix with:" \
-        "    python3 secondbrain/scripts/bump_version.py <new-version>" \
-        "    git add .claude-plugin/marketplace.json secondbrain/skills/*/SKILL.md" \
-        "    git commit"
+    fail "version files are inconsistent" "Fix with:" "    python3 secondbrain/scripts/bump_version.py <version>" "    git add .claude-plugin/marketplace.json secondbrain/.claude-plugin/plugin.json secondbrain/.claude-plugin/release.json secondbrain/skills/*/SKILL.md" "    git commit"
 fi
 
-bold "pre-push: [2/4] release state check"
-CURRENT_VERSION="$(python3 "$BUMP_SCRIPT" --current)"
-EXPECTED_TAG="v$CURRENT_VERSION"
-LATEST_RELEASE_TAG="$(latest_local_semver_tag || true)"
-
-EXPECTED_TAG_EXISTS=0
-EXPECTED_TAG_POINTS_AT_HEAD=0
-if git tag -l "$EXPECTED_TAG" | grep -q .; then
-    EXPECTED_TAG_EXISTS=1
-    if [ "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "$EXPECTED_TAG")" ]; then
-        EXPECTED_TAG_POINTS_AT_HEAD=1
-    fi
-fi
-
-PLAN_JSON="$(python3 "$RELEASE_WORKFLOW" \
-    --current-version "$CURRENT_VERSION" \
-    --latest-release-tag "${LATEST_RELEASE_TAG:-}" \
-    --expected-tag-exists "$EXPECTED_TAG_EXISTS" \
-    --expected-tag-points-at-head "$EXPECTED_TAG_POINTS_AT_HEAD")"
-
-PLAN_ACTION="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["action"])' "$PLAN_JSON")"
-PLAN_REASON="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["reason"])' "$PLAN_JSON")"
-
-case "$PLAN_ACTION" in
-    noop)
-        green "pre-push: $PLAN_REASON"
-        ;;
-    tag_only)
-        bold "pre-push: creating missing release tag ($PLAN_REASON)"
-        python3 "$BUMP_SCRIPT" --tag
-        CURRENT_VERSION="$(python3 "$BUMP_SCRIPT" --current)"
-        prune_local_semver_tags "v$CURRENT_VERSION"
-        bold ""
-        bold "pre-push: created v$CURRENT_VERSION"
-        bold "pre-push: run 'git push' again to include the tag"
-        exit 1
-        ;;
-    bump_and_release)
-        bold "pre-push: auto-bumping release ($PLAN_REASON)"
-        python3 "$BUMP_SCRIPT" --release
-        CURRENT_VERSION="$(python3 "$BUMP_SCRIPT" --current)"
-        prune_local_semver_tags "v$CURRENT_VERSION"
-        bold ""
-        bold "pre-push: bumped and tagged v$CURRENT_VERSION"
-        bold "pre-push: run 'git push' again to include the release commit + tag"
-        exit 1
-        ;;
-    block)
-        fail "release state is ambiguous" "$PLAN_REASON"
-        ;;
-    *)
-        fail "unknown release plan action: $PLAN_ACTION"
-        ;;
-esac
-
-bold "pre-push: [3/4] test_plugin_manifest.py"
+bold "pre-push: [2/4] plugin manifest tests"
 if ! "$PYTEST_BIN" "$TESTS_DIR/test_plugin_manifest.py" -q --no-header; then
-    fail "plugin manifest tests failed — the plugin would ship broken" \
-        "Fix the failures above, then push again."
+    fail "plugin manifest tests failed — the plugin would ship broken" "Fix the failures above, then push again."
 fi
 
-bold "pre-push: [4/5] distribution validation"
+bold "pre-push: [3/4] distribution validation"
 if ! python3 "$PLUGIN_ROOT/scripts/validate_distribution.py" --claude-smoke; then
-    fail "distribution validation failed — marketplace/install or release ZIP is broken" \
-        "Fix the validation errors above, then push again."
+    fail "distribution validation failed — marketplace/install or release ZIP is broken" "Fix the validation errors above, then push again."
 fi
 
-bold "pre-push: [5/5] full pytest suite"
+bold "pre-push: [4/4] full pytest suite"
 if ! "$PYTEST_BIN" "$TESTS_DIR" -q --no-header; then
     fail "tests failed — refusing to push"
 fi
 
-green "pre-push: all checks passed — push allowed"
+green "pre-push: all validation checks passed — push allowed"
 exit 0

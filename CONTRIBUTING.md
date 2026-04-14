@@ -60,17 +60,20 @@ Looking for first issues? These are good entry points:
 
 ## Releasing
 
-**Fully automatic.** Just `git push`. The pre-push hook handles everything:
+**Fully automatic.** Just `git push` to `main`.
 
-1. If the current version already has a tag (meaning no version bump was done), the hook auto-bumps the patch version, commits, and tags. The push aborts — run `git push` again to include the bump.
-2. If the version was manually bumped but not tagged, the hook auto-creates the tag. Push again.
-3. If everything is already in order, the push goes through.
+The local `pre-push` hook is validation-only: it checks version consistency, packaging, and the local Claude marketplace smoke path, but it never mutates the repo or asks for a second push.
 
-`push.followTags` is configured automatically (via `install_git_hooks.py`) so tags are carried with the push. GitHub Actions creates or updates the tagged GitHub Release when the tag arrives and uploads the installable `secondbrain-vX.Y.Z.zip` asset that Cowork expects.
+The actual release mutation happens in GitHub Actions after the push lands on `main`:
 
-**Manual override:** `python3 secondbrain/scripts/bump_version.py --release` does bump + commit + tag in one shot if you prefer to control the version number (e.g., `--release 4.0.0` for a major bump).
+1. `Auto Release Main` computes the next patch version from the latest semver tag.
+2. It rewrites `plugin.json`, `marketplace.json`, `release.json`, and all skill frontmatter in one bot-authored release commit.
+3. It creates the annotated `vX.Y.Z` tag on that release commit and pushes both back to `main`.
+4. `Publish Release` builds `secondbrain-vX.Y.Z.zip`, validates it, uploads it to GitHub Releases, then downloads the published asset and validates the real uploaded artifact again.
 
-**Why this matters:** Cowork's server-managed marketplace relies on git tags and GitHub releases to detect plugin updates. Versions without tags are invisible to Cowork. The pre-push hook ensures every push has a corresponding tag — no manual steps to forget.
+`push.followTags` is still configured automatically via `install_git_hooks.py`, but contributors do not need to create tags manually for normal releases.
+
+**Why this matters:** Cowork's server-managed marketplace relies on git tags and GitHub releases to detect plugin updates. The repository now guarantees those artifacts are created automatically from `main`, and the shipped runtime identity is tracked explicitly in `secondbrain/.claude-plugin/release.json`.
 
 ### Release verification checklist
 

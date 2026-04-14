@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-bump_version.py — Bump version across all files that contain it.
+bump_version.py — Bump version across all shipped version-managed files.
 
-Ensures marketplace.json and all SKILL.md frontmatter stay in sync.
-Bumps patch by default, or accepts explicit version.
+Ensures plugin.json, marketplace.json, release.json, and all SKILL.md
+frontmatter stay in sync. Bumps patch by default, or accepts explicit version.
 
 Usage:
     python3 bump_version.py                    # auto bump patch
     python3 bump_version.py 3.1.0             # set explicit version
-    python3 bump_version.py --check            # verify all versions match (exit 1 if not)
+    python3 bump_version.py --check           # verify all versions match (exit 1 if not)
 """
 
 from __future__ import annotations
@@ -18,22 +18,23 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
-PLUGIN_ROOT = Path(__file__).resolve().parent.parent  # secondbrain/
-REPO_ROOT = PLUGIN_ROOT.parent                        # repo root (contains .claude-plugin/marketplace.json)
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = PLUGIN_ROOT.parent
+RELEASE_SCHEMA_VERSION = 1
 
 VERSION_FILES = {
     "plugin.json": PLUGIN_ROOT / ".claude-plugin" / "plugin.json",
     "marketplace.json": REPO_ROOT / ".claude-plugin" / "marketplace.json",
+    "release.json": PLUGIN_ROOT / ".claude-plugin" / "release.json",
 }
 
 SKILLS_DIR = PLUGIN_ROOT / "skills"
-SKILL_VERSION_RE = re.compile(r'^(\s*version:\s*")([^"]+)(")', re.MULTILINE)
+SKILL_VERSION_RE = re.compile(r'^(\s*version:\s*")(.*?)(")', re.MULTILINE)
 
 
 def read_current_version() -> str:
-    """Read version from marketplace.json (the canonical source)."""
     data = json.loads(VERSION_FILES["marketplace.json"].read_text())
     plugins = data.get("plugins", [])
     if not plugins:
@@ -42,8 +43,8 @@ def read_current_version() -> str:
 
 
 def parse_version(v: str) -> Tuple[int, int, int]:
-    parts = v.split(".")
-    return int(parts[0]), int(parts[1]), int(parts[2])
+    major, minor, patch = v.split(".")
+    return int(major), int(minor), int(patch)
 
 
 def bump_patch(v: str) -> str:
@@ -51,52 +52,70 @@ def bump_patch(v: str) -> str:
     return f"{major}.{minor}.{patch + 1}"
 
 
+def release_tag(version: str) -> str:
+    return f"v{version}"
+
+
+def release_asset_name(version: str) -> str:
+    return f"secondbrain-v{version}.zip"
+
+
+def release_manifest_defaults(version: str) -> dict[str, Any]:
+    return {
+        "schemaVersion": RELEASE_SCHEMA_VERSION,
+        "pluginVersion": version,
+        "gitTag": release_tag(version),
+        "gitCommit": "",
+        "releaseAssetName": release_asset_name(version),
+    }
+
+
 def find_skill_files() -> List[Path]:
     return sorted(SKILLS_DIR.glob("*/SKILL.md"))
 
 
+def load_release_manifest() -> dict[str, Any]:
+    path = VERSION_FILES["release.json"]
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
 def get_all_versions() -> List[Tuple[str, str, Path]]:
-    """Return [(source_name, version, path), ...] for all version locations."""
-    versions = []
+    versions: List[Tuple[str, str, Path]] = []
 
-    # plugin.json — Cowork installs and extracted runtime bundles consult the
-    # shipped plugin manifest version when deciding whether the plugin changed.
-    # If this drifts from marketplace.json, updates can silently stop landing.
-    p = VERSION_FILES["plugin.json"]
-    data = json.loads(p.read_text())
-    versions.append(("plugin.json (version)", data.get("version", ""), p))
+    plugin_path = VERSION_FILES["plugin.json"]
+    plugin_data = json.loads(plugin_path.read_text())
+    versions.append(("plugin.json (version)", plugin_data.get("version", ""), plugin_path))
 
-    # marketplace.json — two version locations that must stay in lockstep
-    p = VERSION_FILES["marketplace.json"]
-    data = json.loads(p.read_text())
-    # 1) top-level metadata.version — catalog-level version Cowork/Code use
-    #    to detect marketplace updates. If this doesn't bump, the marketplace
-    #    is silently treated as unchanged.
-    metadata_version = data.get("metadata", {}).get("version", "")
+    marketplace_path = VERSION_FILES["marketplace.json"]
+    marketplace_data = json.loads(marketplace_path.read_text())
+    metadata_version = marketplace_data.get("metadata", {}).get("version", "")
     if metadata_version:
-        versions.append(("marketplace.json (metadata.version)", metadata_version, p))
-    # 2) per-plugin version
-    for plugin in data.get("plugins", []):
-        versions.append(("marketplace.json (plugins[].version)", plugin.get("version", ""), p))
+        versions.append(("marketplace.json (metadata.version)", metadata_version, marketplace_path))
+    for plugin in marketplace_data.get("plugins", []):
+        versions.append(("marketplace.json (plugins[].version)", plugin.get("version", ""), marketplace_path))
 
-    # SKILL.md files
+    release_path = VERSION_FILES["release.json"]
+    release_data = json.loads(release_path.read_text())
+    versions.append(("release.json (pluginVersion)", release_data.get("pluginVersion", ""), release_path))
+
     for skill_path in find_skill_files():
         text = skill_path.read_text()
-        m = SKILL_VERSION_RE.search(text)
-        if m:
-            versions.append((f"skills/{skill_path.parent.name}/SKILL.md", m.group(2), skill_path))
+        match = SKILL_VERSION_RE.search(text)
+        if match:
+            versions.append((f"skills/{skill_path.parent.name}/SKILL.md", match.group(2), skill_path))
 
     return versions
 
 
 def check_consistency() -> Tuple[bool, List[str]]:
-    """Check all versions match. Returns (consistent, messages)."""
     versions = get_all_versions()
     if not versions:
         return False, ["No version files found"]
 
     canonical = versions[0][1]
-    mismatches = []
+    mismatches: list[str] = []
     for name, version, _ in versions:
         if version != canonical:
             mismatches.append(f"  {name}: {version} (expected {canonical})")
@@ -106,35 +125,64 @@ def check_consistency() -> Tuple[bool, List[str]]:
     return True, [f"All {len(versions)} version references are {canonical}"]
 
 
-def set_version(new_version: str) -> int:
-    """Set version everywhere. Returns count of files changed."""
+def set_version(
+    new_version: str,
+    *,
+    git_tag: str | None = None,
+    git_commit: str | None = None,
+    release_asset_name: str | None = None,
+) -> int:
     changed = 0
 
-    # plugin.json — runtime/plugin install manifest version. Keep this in
-    # lockstep with marketplace.json so Cowork sees the plugin itself change.
-    p = VERSION_FILES["plugin.json"]
-    data = json.loads(p.read_text())
-    if data.get("version") != new_version:
-        data["version"] = new_version
-        p.write_text(json.dumps(data, indent=2) + "\n")
+    plugin_path = VERSION_FILES["plugin.json"]
+    plugin_data = json.loads(plugin_path.read_text())
+    if plugin_data.get("version") != new_version:
+        plugin_data["version"] = new_version
+        plugin_path.write_text(json.dumps(plugin_data, indent=2) + "\n")
         changed += 1
 
-    # marketplace.json — update BOTH metadata.version and plugins[].version.
-    # metadata.version is the marketplace catalog version; letting it drift
-    # from plugin.version is how we silently broke Cowork update detection.
-    p = VERSION_FILES["marketplace.json"]
-    data = json.loads(p.read_text())
-    metadata = data.setdefault("metadata", {})
+    marketplace_path = VERSION_FILES["marketplace.json"]
+    marketplace_data = json.loads(marketplace_path.read_text())
+    metadata = marketplace_data.setdefault("metadata", {})
     if metadata.get("version") != new_version:
         metadata["version"] = new_version
         changed += 1
-    for plugin in data.get("plugins", []):
+    for plugin in marketplace_data.get("plugins", []):
         if plugin.get("version") != new_version:
             plugin["version"] = new_version
             changed += 1
-    p.write_text(json.dumps(data, indent=2) + "\n")
+    marketplace_path.write_text(json.dumps(marketplace_data, indent=2) + "\n")
 
-    # SKILL.md files
+    release_path = VERSION_FILES["release.json"]
+    release_data = load_release_manifest() or {}
+    previous_version = release_data.get("pluginVersion")
+    desired_defaults = release_manifest_defaults(new_version)
+    desired_git_tag = git_tag if git_tag is not None else desired_defaults["gitTag"]
+    desired_asset = release_asset_name if release_asset_name is not None else desired_defaults["releaseAssetName"]
+    if git_commit is not None:
+        desired_commit = git_commit
+    elif previous_version != new_version:
+        desired_commit = ""
+    else:
+        desired_commit = release_data.get("gitCommit", desired_defaults["gitCommit"])
+
+    desired_release = {
+        **release_data,
+        "schemaVersion": RELEASE_SCHEMA_VERSION,
+        "pluginVersion": new_version,
+        "gitTag": desired_git_tag,
+        "gitCommit": desired_commit,
+        "releaseAssetName": desired_asset,
+    }
+
+    release_changed_fields = 0
+    for key, value in desired_release.items():
+        if release_data.get(key) != value:
+            release_changed_fields += 1
+    if release_changed_fields:
+        release_path.write_text(json.dumps(desired_release, indent=2) + "\n")
+        changed += release_changed_fields
+
     for skill_path in find_skill_files():
         text = skill_path.read_text()
         new_text = SKILL_VERSION_RE.sub(rf'\g<1>{new_version}\3', text)
@@ -148,98 +196,76 @@ def set_version(new_version: str) -> int:
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", str(REPO_ROOT), *args],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
 
 
 def version_managed_paths() -> List[Path]:
-    paths = [VERSION_FILES["plugin.json"], VERSION_FILES["marketplace.json"]]
+    paths = [
+        VERSION_FILES["plugin.json"],
+        VERSION_FILES["marketplace.json"],
+        VERSION_FILES["release.json"],
+    ]
     paths.extend(find_skill_files())
     return paths
 
 
 def assert_release_tree_clean() -> bool:
-    """Release automation must start from a clean tree.
-
-    This prevents the old `git add -u` bug where a version bump commit could
-    accidentally capture unrelated tracked changes.
-    """
     return _git("status", "--porcelain").stdout.strip() == ""
 
 
 def create_tag(version: str) -> int:
-    """Create an annotated git tag for the current version.
-
-    Preconditions (all enforced):
-      - working tree is clean
-      - all version references are consistent
-      - tag v{version} does not already exist
-    """
-    tag = f"v{version}"
-
-    # Working tree must be clean
+    tag = release_tag(version)
     status = _git("status", "--porcelain").stdout.strip()
     if status:
-        print(f"error: working tree is dirty — commit or stash first",
-              file=sys.stderr)
+        print("error: working tree is dirty — commit or stash first", file=sys.stderr)
         return 1
 
-    # Version consistency
     ok, messages = check_consistency()
     if not ok:
         for msg in messages:
             print(msg, file=sys.stderr)
         return 1
 
-    # Tag must not already exist
     existing = _git("tag", "-l", tag).stdout.strip()
     if existing:
         print(f"error: tag {tag} already exists", file=sys.stderr)
         return 1
 
-    # Create annotated tag (annotated so push.followTags picks it up)
     _git("tag", "-a", tag, "-m", tag)
     print(f"Created tag {tag}")
     return 0
 
 
 def release(new_version: Optional[str] = None) -> int:
-    """Full release pipeline: bump files, commit, tag.
-
-    After this, the developer just runs `git push` and push.followTags
-    carries the tag. GitHub Actions creates the release.
-    """
     current = read_current_version()
     if new_version is None:
         new_version = bump_patch(current)
 
     if not assert_release_tree_clean():
         print(
-            "error: working tree is dirty — release automation refuses to "
-            "stage unrelated changes",
+            "error: working tree is dirty — release automation refuses to stage unrelated changes",
             file=sys.stderr,
         )
         return 1
 
-    # Bump version in all files
     print(f"{current} -> {new_version}")
     changed = set_version(new_version)
     print(f"Updated {changed} files")
 
-    # Verify consistency
     ok, messages = check_consistency()
     for msg in messages:
         print(msg)
     if not ok:
         return 1
 
-    # Stage and commit
     stage_paths = [str(path.relative_to(REPO_ROOT)) for path in version_managed_paths()]
     _git("add", "--", *stage_paths)
     _git("commit", "-m", f"Bump to {new_version}")
-    print(f"Committed version bump")
+    print("Committed version bump")
 
-    # Create tag
     rc = create_tag(new_version)
     if rc != 0:
         return rc
@@ -249,7 +275,7 @@ def release(new_version: Optional[str] = None) -> int:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    args = argv if argv is not None else sys.argv[1:]
+    args = list(argv if argv is not None else sys.argv[1:])
 
     if "--check" in args:
         ok, messages = check_consistency()
@@ -258,32 +284,52 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0 if ok else 1
 
     if "--tag" in args:
-        version = read_current_version()
-        return create_tag(version)
+        return create_tag(read_current_version())
 
     if "--current" in args:
         print(read_current_version())
         return 0
 
-    # Extract explicit version from args (first non-flag argument)
-    explicit_version = None
-    for a in args:
-        if not a.startswith("-"):
-            explicit_version = a
-            break
+    git_tag_arg: str | None = None
+    git_commit_arg: str | None = None
+    release_asset_arg: str | None = None
+
+    cleaned_args: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--git-tag":
+            git_tag_arg = args[i + 1]
+            i += 2
+            continue
+        if arg == "--git-commit":
+            git_commit_arg = args[i + 1]
+            i += 2
+            continue
+        if arg == "--release-asset":
+            release_asset_arg = args[i + 1]
+            i += 2
+            continue
+        cleaned_args.append(arg)
+        i += 1
+    args = cleaned_args
+
+    explicit_version = next((arg for arg in args if not arg.startswith("-")), None)
 
     if "--release" in args:
         return release(explicit_version)
 
-    # Plain bump (no commit, no tag) — for edge cases
     current = read_current_version()
     new_version = explicit_version if explicit_version else bump_patch(current)
-
     print(f"{current} -> {new_version}")
-    changed = set_version(new_version)
+    changed = set_version(
+        new_version,
+        git_tag=git_tag_arg,
+        git_commit=git_commit_arg,
+        release_asset_name=release_asset_arg,
+    )
     print(f"Updated {changed} files")
 
-    # Verify
     ok, messages = check_consistency()
     for msg in messages:
         print(msg)

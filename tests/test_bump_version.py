@@ -71,6 +71,13 @@ class TestSetVersion:
             "metadata": {"description": "test", "version": "1.0.0"},
             "plugins": [{"name": "test", "version": "1.0.0", "source": "./"}]
         }))
+        (plugin_dir / "release.json").write_text(json.dumps({
+            "schemaVersion": 1,
+            "pluginVersion": "1.0.0",
+            "gitTag": "v1.0.0",
+            "gitCommit": "deadbeef",
+            "releaseAssetName": "secondbrain-v1.0.0.zip",
+        }))
 
         # Create mock skills
         for name in ["skill-a", "skill-b"]:
@@ -96,11 +103,12 @@ class TestSetVersion:
             bump_version.VERSION_FILES = {
                 "plugin.json": plugin_dir / "plugin.json",
                 "marketplace.json": plugin_dir / "marketplace.json",
+                "release.json": plugin_dir / "release.json",
             }
             bump_version.SKILLS_DIR = tmp_path / "skills"
 
             changed = set_version("2.0.0")
-            assert changed == 5  # plugin.json + marketplace metadata + plugin version + 2 skills
+            assert changed == 9  # plugin + marketplace metadata + plugin version + 4 release fields + 2 skills
 
             # Verify plugin.json
             data = json.loads((plugin_dir / "plugin.json").read_text())
@@ -109,6 +117,13 @@ class TestSetVersion:
             # Verify marketplace.json
             data = json.loads((plugin_dir / "marketplace.json").read_text())
             assert data["plugins"][0]["version"] == "2.0.0"
+
+            # Verify release.json
+            release = json.loads((plugin_dir / "release.json").read_text())
+            assert release["pluginVersion"] == "2.0.0"
+            assert release["gitTag"] == "v2.0.0"
+            assert release["gitCommit"] == ""
+            assert release["releaseAssetName"] == "secondbrain-v2.0.0.zip"
 
             # Verify skills
             for name in ["skill-a", "skill-b"]:
@@ -133,6 +148,13 @@ class TestSetVersion:
             "metadata": {"description": "test", "version": "2.0.0"},
             "plugins": [{"name": "test", "version": "2.0.0", "source": "./"}]
         }))
+        (plugin_dir / "release.json").write_text(json.dumps({
+            "schemaVersion": 1,
+            "pluginVersion": "2.0.0",
+            "gitTag": "v2.0.0",
+            "gitCommit": "",
+            "releaseAssetName": "secondbrain-v2.0.0.zip",
+        }))
 
         import bump_version  # pyright: ignore[reportMissingImports]
         orig_files = bump_version.VERSION_FILES
@@ -142,12 +164,60 @@ class TestSetVersion:
             bump_version.VERSION_FILES = {
                 "plugin.json": plugin_dir / "plugin.json",
                 "marketplace.json": plugin_dir / "marketplace.json",
+                "release.json": plugin_dir / "release.json",
             }
             bump_version.SKILLS_DIR = tmp_path / "skills"
             (tmp_path / "skills").mkdir()
 
             changed = set_version("2.0.0")
             assert changed == 0
+        finally:
+            bump_version.VERSION_FILES = orig_files
+            bump_version.SKILLS_DIR = orig_skills
+
+    def test_can_override_release_manifest_identity(self, tmp_path: Path):
+        plugin_dir = tmp_path / ".claude-plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / "plugin.json").write_text(json.dumps({
+            "name": "test",
+            "version": "2.0.0",
+        }))
+        (plugin_dir / "marketplace.json").write_text(json.dumps({
+            "name": "test",
+            "owner": {"name": "test"},
+            "metadata": {"description": "test", "version": "2.0.0"},
+            "plugins": [{"name": "test", "version": "2.0.0", "source": "./"}]
+        }))
+        (plugin_dir / "release.json").write_text(json.dumps({
+            "schemaVersion": 1,
+            "pluginVersion": "2.0.0",
+            "gitTag": "v2.0.0",
+            "gitCommit": "",
+            "releaseAssetName": "secondbrain-v2.0.0.zip",
+        }))
+
+        import bump_version  # pyright: ignore[reportMissingImports]
+        orig_files = bump_version.VERSION_FILES
+        orig_skills = bump_version.SKILLS_DIR
+
+        try:
+            bump_version.VERSION_FILES = {
+                "plugin.json": plugin_dir / "plugin.json",
+                "marketplace.json": plugin_dir / "marketplace.json",
+                "release.json": plugin_dir / "release.json",
+            }
+            bump_version.SKILLS_DIR = tmp_path / "skills"
+            (tmp_path / "skills").mkdir()
+
+            changed = set_version(
+                "2.0.0",
+                git_commit="abc123",
+                git_tag="v2.0.0",
+                release_asset_name="secondbrain-v2.0.0.zip",
+            )
+            assert changed == 1
+            release = json.loads((plugin_dir / "release.json").read_text())
+            assert release["gitCommit"] == "abc123"
         finally:
             bump_version.VERSION_FILES = orig_files
             bump_version.SKILLS_DIR = orig_skills
@@ -173,6 +243,13 @@ class TestMain:
             "metadata": {"description": "test", "version": "1.0.0"},
             "plugins": [{"name": "test", "version": "1.0.0", "source": "./"}]
         }))
+        (plugin_dir / "release.json").write_text(json.dumps({
+            "schemaVersion": 1,
+            "pluginVersion": "1.0.0",
+            "gitTag": "v1.0.0",
+            "gitCommit": "",
+            "releaseAssetName": "secondbrain-v1.0.0.zip",
+        }))
 
         import bump_version  # pyright: ignore[reportMissingImports]
         orig_root = bump_version.REPO_ROOT
@@ -184,6 +261,7 @@ class TestMain:
             bump_version.VERSION_FILES = {
                 "plugin.json": plugin_dir / "plugin.json",
                 "marketplace.json": plugin_dir / "marketplace.json",
+                "release.json": plugin_dir / "release.json",
             }
             bump_version.SKILLS_DIR = tmp_path / "skills"
             (tmp_path / "skills").mkdir()
@@ -194,6 +272,8 @@ class TestMain:
             assert data["version"] == "5.0.0"
             marketplace = json.loads((plugin_dir / "marketplace.json").read_text())
             assert marketplace["plugins"][0]["version"] == "5.0.0"
+            release = json.loads((plugin_dir / "release.json").read_text())
+            assert release["pluginVersion"] == "5.0.0"
         finally:
             bump_version.REPO_ROOT = orig_root
             bump_version.VERSION_FILES = orig_files

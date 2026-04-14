@@ -19,6 +19,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
       - name: Validate semver tag
         run: |
           if ! [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -52,12 +57,21 @@ jobs:
           asset="secondbrain-${tag}.zip"
           git archive --format=zip --prefix=secondbrain/ -o "$RUNNER_TEMP/$asset" HEAD:secondbrain
           echo "RELEASE_ASSET=$RUNNER_TEMP/$asset" >> "$GITHUB_ENV"
+          echo "RELEASE_ASSET_NAME=$asset" >> "$GITHUB_ENV"
 
-      - name: Validate release zip
+      - name: Validate built release zip
         run: |
-          python3 secondbrain/scripts/validate_distribution.py --zip-path "$RELEASE_ASSET"
+          python3 secondbrain/scripts/validate_distribution.py --zip-path "$RELEASE_ASSET" --expected-tag "${GITHUB_REF_NAME}" --expected-asset-name "$RELEASE_ASSET_NAME"
 
       - name: Upload release zip
         run: |
           tag="${GITHUB_REF_NAME}"
           gh release upload "$tag" "$RELEASE_ASSET" --clobber
+
+      - name: Validate published release asset
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          download_dir="$RUNNER_TEMP/published-release"
+          mkdir -p "$download_dir"
+          gh release download "$tag" --pattern "$RELEASE_ASSET_NAME" --dir "$download_dir"
+          python3 secondbrain/scripts/validate_distribution.py --zip-path "$download_dir/$RELEASE_ASSET_NAME" --expected-tag "$tag" --expected-asset-name "$RELEASE_ASSET_NAME"

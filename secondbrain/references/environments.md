@@ -150,7 +150,7 @@ Claude Code maintains a local git clone at `~/.claude/plugins/marketplaces/secon
 
 Cowork's marketplace is server-managed (marketplaceId-based). The plugin is NOT cloned locally by Cowork — the server maintains a clone and syncs it to connected clients. If the server clone becomes stale (no tags pushed, or history disrupted by a force-push), Cowork reports "already up to date" even when the repo has advanced.
 
-**Tags and GitHub releases are the reliable signals that trigger the server to refresh.** The `bump_version.py --release` pipeline and pre-push hook enforce that every push has a corresponding annotated tag. GitHub Actions creates a release when the tag arrives.
+**Tags and GitHub releases are the reliable signals that trigger the server to refresh.** Pushes to `main` now trigger an automatic patch release workflow that rewrites the shipped version files, creates the annotated tag, and publishes the GitHub release asset without any manual bump/tag step on the contributor machine.
 
 ## Platform paths (macOS / Linux / Windows)
 
