@@ -28,6 +28,25 @@ command -v python3 >/dev/null 2>&1 || fail "python3 not on PATH"
 PYTEST_BIN="$(command -v pytest || true)"
 [ -n "$PYTEST_BIN" ] || fail "pytest not on PATH" "Activate the project environment that provides pytest and retry."
 
+ZERO_OID="0000000000000000000000000000000000000000"
+deletion_only=1
+saw_ref=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ -n "${local_ref:-}" ] || continue
+    saw_ref=1
+    if [ "$local_ref" != "(delete)" ] || [ "$local_sha" != "$ZERO_OID" ]; then
+        deletion_only=0
+        break
+    fi
+done
+
+if [ "$saw_ref" -eq 1 ]; then
+    if [ "$deletion_only" -eq 1 ]; then
+        green "pre-push: deletion-only push detected — skipping validation"
+        exit 0
+    fi
+fi
+
 bold "pre-push: validation gate starting"
 
 bold "pre-push: [1/4] version consistency check"

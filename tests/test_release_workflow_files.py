@@ -99,3 +99,31 @@ def test_pre_push_is_validation_only():
     assert "run 'git push' again" not in text, (
         "pre-push must not require a second push after mutating the repo"
     )
+
+
+def test_pre_push_skips_deletion_only_pushes():
+    text = PRE_PUSH.read_text(encoding="utf-8")
+    assert "while read -r local_ref local_sha remote_ref remote_sha" in text, (
+        "pre-push must inspect the refs git passes on stdin so it can distinguish "
+        "real updates from deletion-only pushes"
+    )
+    assert "deletion-only push detected" in text, (
+        "pre-push must print an explicit skip message for deletion-only pushes "
+        "instead of running the full validation gate"
+    )
+    assert "0000000000000000000000000000000000000000" in text, (
+        "pre-push must recognize Git's all-zero object id used for deletion refs"
+    )
+
+
+def test_pre_push_only_skips_when_every_ref_is_a_delete():
+    text = PRE_PUSH.read_text(encoding="utf-8")
+    assert "deletion_only=1" in text, (
+        "pre-push must track whether all pushed refs are deletions before deciding to skip"
+    )
+    assert 'if [ "$deletion_only" -eq 1 ]; then' in text, (
+        "pre-push must gate the skip path on every ref being a deletion"
+    )
+    assert "validation gate starting" in text, (
+        "pre-push must continue into the normal validation flow for mixed or regular pushes"
+    )
