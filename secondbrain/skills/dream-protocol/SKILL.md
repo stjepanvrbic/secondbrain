@@ -7,7 +7,7 @@ description: >
   Orchestrates a semantic worker followed by a structural worker so the vault
   ends the run in a fully healthy state.
 metadata:
-  version: "3.5.23"
+  version: "3.5.24"
 ---
 
 # Core Rule
