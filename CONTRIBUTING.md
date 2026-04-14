@@ -72,6 +72,19 @@ Looking for first issues? These are good entry points:
 
 **Why this matters:** Cowork's server-managed marketplace relies on git tags and GitHub releases to detect plugin updates. Versions without tags are invisible to Cowork. The pre-push hook ensures every push has a corresponding tag — no manual steps to forget.
 
+### Release verification checklist
+
+Do not stop at "push succeeded". A Cowork-facing release is only done when:
+
+1. `git ls-remote --tags origin 'v*'` shows the new annotated tag on `origin`
+2. GitHub Actions `Publish Release` passes for that tag
+3. the latest GitHub release exists and includes `secondbrain-vX.Y.Z.zip`
+4. Cowork updates to that version and the extracted runtime bundle's `plugin.json`
+   reports the same version
+
+If any of those fail, Cowork can continue reporting "already up to date" even
+though your local clone looks correct.
+
 ---
 
 ## Commit messages

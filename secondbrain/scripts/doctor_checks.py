@@ -50,7 +50,7 @@ import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
@@ -144,6 +144,11 @@ def _default_cowork_desktop_config_path() -> Path:
     return resolve_claude_desktop_config_path()
 
 
+def _resolve_cowork_app_root(desktop_config_path: Optional[Path] = None) -> Path:
+    """Return the Claude Desktop application-data root for the current platform."""
+    return resolve_claude_desktop_config_path(desktop_config_path).parent
+
+
 def _load_cowork_obsidian_server(
     desktop_config_path: Optional[Path] = None,
 ) -> Optional[Dict[str, Any]]:
@@ -220,6 +225,218 @@ def _find_installed_plugin_json(plugin_root: Path) -> Optional[Path]:
         if candidate.is_file():
             return candidate
     return None
+
+
+def _extract_cowork_runtime_coords(plugin_root: Path) -> Optional[tuple[str, str]]:
+    """Extract `<workspace_id>, <runtime_session_id>` from a Cowork runtime path."""
+    parts = plugin_root.resolve().parts
+    try:
+        idx = parts.index("local-agent-mode-sessions")
+    except ValueError:
+        return None
+    if idx + 2 >= len(parts):
+        return None
+    return parts[idx + 1], parts[idx + 2]
+
+
+def _parse_audit_timestamp(raw: Any) -> Optional[datetime]:
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _entry_mentions_prompt_too_long(entry: Dict[str, Any]) -> bool:
+    try:
+        return "Prompt is too long" in json.dumps(entry, sort_keys=True)
+    except TypeError:
+        return False
+
+
+_COWORK_BRIDGE_CACHE_READ_THRESHOLD = 500_000
+_COWORK_BRIDGE_AGE_THRESHOLD = timedelta(days=7)
+
+
+def check_cowork_dispatch_bridge(
+    environment: Optional[str] = None,
+    plugin_root: Optional[Path] = None,
+    desktop_config_path: Optional[Path] = None,
+) -> CheckResult:
+    """Inspect Cowork's active dispatch bridge session for overflow symptoms."""
+    env = environment or _detect_environment()
+    if env != "cowork":
+        return CheckResult(
+            name="cowork_dispatch_bridge",
+            status="pass",
+            message="Cowork dispatch bridge check not applicable outside Cowork",
+            fixable=False,
+        )
+
+    resolved_plugin_root = _resolve_plugin_root(plugin_root)
+    if resolved_plugin_root is None:
+        return CheckResult(
+            name="cowork_dispatch_bridge",
+            status="warning",
+            message="cannot resolve plugin root to inspect Cowork dispatch bridge state",
+            fixable=False,
+        )
+
+    runtime_coords = _extract_cowork_runtime_coords(resolved_plugin_root)
+    if runtime_coords is None:
+        return CheckResult(
+            name="cowork_dispatch_bridge",
+            status="warning",
+            message=(
+                "cannot determine the active Cowork runtime session from the installed plugin path; "
+                "doctor cannot inspect bridge overflow from this runtime."
+            ),
+            fixable=False,
+        )
+
+    workspace_id, runtime_session_id = runtime_coords
+    app_root = _resolve_cowork_app_root(desktop_config_path)
+    bridge_state_path = app_root / "bridge-state.json"
+    if not bridge_state_path.is_file():
+        return CheckResult(
+            name="cowork_dispatch_bridge",
+            status="pass",
+            message=f"no Cowork bridge-state.json at {bridge_state_path}",
+            fixable=False,
+        )
+
+    try:
+        bridge_state = json.loads(bridge_state_path.read_text())
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(
+            name="cowork_dispatch_bridge",
+            status="warning",
+            message=f"could not read Cowork bridge-state.json: {exc}",
+            fixable=False,
+        )
+
+    bridge_key = f"{runtime_session_id}:{workspace_id}"
+    bridge_entry = bridge_state.get(bridge_key)
+    if not isinstance(bridge_entry, dict):
+        return CheckResult(
+            name="cowork_dispatch_bridge",
+            status="pass",
+            message="no active Cowork dispatch bridge mapping for this runtime session",
+            fixable=False,
+            details={"bridge_state_path": str(bridge_state_path), "bridge_key": bridge_key},
+        )
+
+    local_session_id = bridge_entry.get("localSessionId")
+    if not isinstance(local_session_id, str) or not local_session_id:
+        return CheckResult(
+            name="cowork_dispatch_bridge",
+            status="warning",
+            message=f"Cowork bridge-state entry {bridge_key} is missing localSessionId",
+            fixable=False,
+        )
+
+    audit_path = (
+        app_root
+        / "local-agent-mode-sessions"
+        / workspace_id
+        / runtime_session_id
+        / "agent"
+        / local_session_id
+        / "audit.jsonl"
+    )
+    if not audit_path.is_file():
+        return CheckResult(
+            name="cowork_dispatch_bridge",
+            status="warning",
+            message=f"active Cowork dispatch bridge audit missing: {audit_path}",
+            fixable=False,
+        )
+
+    first_init_at: Optional[datetime] = None
+    max_cache_read_tokens = 0
+    prompt_too_long_count = 0
+
+    try:
+        with audit_path.open() as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                entry = json.loads(line)
+                if (
+                    first_init_at is None
+                    and entry.get("type") == "system"
+                    and entry.get("subtype") == "init"
+                ):
+                    first_init_at = _parse_audit_timestamp(entry.get("_audit_timestamp"))
+                if _entry_mentions_prompt_too_long(entry):
+                    prompt_too_long_count += 1
+                if entry.get("type") == "result" and entry.get("subtype") == "success":
+                    usage = entry.get("usage", {})
+                    if isinstance(usage, dict):
+                        max_cache_read_tokens = max(
+                            max_cache_read_tokens,
+                            int(usage.get("cache_read_input_tokens", 0) or 0),
+                        )
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(
+            name="cowork_dispatch_bridge",
+            status="warning",
+            message=f"could not parse Cowork dispatch bridge audit: {exc}",
+            fixable=False,
+        )
+
+    age_days: Optional[float] = None
+    if first_init_at is not None:
+        age_days = (datetime.now(timezone.utc) - first_init_at).total_seconds() / 86400.0
+
+    reasons: List[str] = []
+    if prompt_too_long_count > 0:
+        reasons.append(f"saw {prompt_too_long_count} 'Prompt is too long' result(s)")
+    if max_cache_read_tokens >= _COWORK_BRIDGE_CACHE_READ_THRESHOLD:
+        reasons.append(
+            "max cache_read_input_tokens="
+            f"{max_cache_read_tokens} (threshold {_COWORK_BRIDGE_CACHE_READ_THRESHOLD})"
+        )
+    if age_days is not None and age_days > _COWORK_BRIDGE_AGE_THRESHOLD.total_seconds() / 86400.0:
+        reasons.append(f"bridge age {age_days:.1f} days exceeds the 7 days threshold")
+
+    details = {
+        "bridge_state_path": str(bridge_state_path),
+        "bridge_key": bridge_key,
+        "local_session_id": local_session_id,
+        "audit_path": str(audit_path),
+        "prompt_too_long_count": prompt_too_long_count,
+        "max_cache_read_input_tokens": max_cache_read_tokens,
+        "bridge_age_days": age_days,
+    }
+
+    if reasons:
+        remediation = (
+            "quit Claude Desktop completely, back up "
+            f"{bridge_state_path}, back up or rename {app_root / 'local-agent-mode-sessions'}, "
+            "relaunch Claude Desktop, then retry one scheduled dispatch."
+        )
+        return CheckResult(
+            name="cowork_dispatch_bridge",
+            status="warning",
+            message="Cowork dispatch bridge looks bloated — " + "; ".join(reasons) + ". " + remediation,
+            fixable=False,
+            details=details,
+        )
+
+    health_bits: List[str] = []
+    if age_days is not None:
+        health_bits.append(f"age {age_days:.1f} days")
+    health_bits.append(f"max cache_read_input_tokens {max_cache_read_tokens}")
+    return CheckResult(
+        name="cowork_dispatch_bridge",
+        status="pass",
+        message="active Cowork dispatch bridge looks healthy (" + ", ".join(health_bits) + ")",
+        fixable=False,
+        details=details,
+    )
 
 
 def check_plugin_root(plugin_root: Optional[Path] = None) -> CheckResult:
@@ -1652,6 +1869,13 @@ def run_all_checks(
     # Checks 1-5 don't need vault access.
     results.append(check_plugin_root(plugin_root))
     results.append(check_environment(environment=env))
+    results.append(
+        check_cowork_dispatch_bridge(
+            environment=env,
+            plugin_root=plugin_root,
+            desktop_config_path=desktop_config_path,
+        )
+    )
     api_key_result = check_obsidian_api_key(
         environment=env,
         desktop_config_path=desktop_config_path,

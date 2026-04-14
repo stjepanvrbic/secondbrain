@@ -74,6 +74,21 @@ class TestFormatHuman:
         assert "Result: 1 passed, 1 failed, 0 warning, 0 skipped." in report
         assert "I can fix 1 of these" in report
 
+    def test_human_report_renders_cowork_bridge_warning(self):
+        results = [
+            CheckResult(
+                "cowork_dispatch_bridge",
+                "warning",
+                "Cowork dispatch bridge looks bloated. Quit Claude Desktop and reset bridge state.",
+                False,
+            ),
+        ]
+
+        report = format_human(results)
+
+        assert "cowork_dispatch_bridge" in report
+        assert "Quit Claude Desktop" in report
+
 
 class TestDoctorReportCli:
     def test_cli_merges_raw_and_supplemental_json(self, tmp_path: Path, capsys):

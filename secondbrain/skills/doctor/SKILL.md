@@ -43,7 +43,9 @@ logic in this skill body; always call the CLI.
 Doctor does NOT define final vault health. Final vault health belongs to
 `/secondbrain:dream-protocol`. Read
 `@${CLAUDE_PLUGIN_ROOT}/references/healthy-vault.md` before escalating
-vault-state repair.
+vault-state repair. Dream Protocol repairs vault state only; it does NOT
+reset Cowork bridge-session state, and reinstalling/updating the plugin
+does NOT clear an already bloated Cowork dispatch bridge.
 
 # Prerequisites
 
@@ -145,6 +147,7 @@ question, and then **STOP**.
 | `vault_verification` (Check 18) | run `/secondbrain:dream-protocol` to fix vault errors (wikilinks, inbox archiving, orphans) |
 | `legacy_claude_md` (Check 19, warning) | delete or archive `CLAUDE.md` at vault root — deprecated since v3.3.3, may pollute agent context |
 | `plugin_version_mismatch` (Check 20, warning) | in Cowork, remove and reinstall the plugin from the marketplace |
+| `cowork_dispatch_bridge` (Cowork warning) | fully quit Claude Desktop, back up `~/Library/Application Support/Claude/bridge-state.json` and `~/Library/Application Support/Claude/local-agent-mode-sessions/`, clear or rename them, relaunch Claude Desktop, then retry dispatch |
 
 # Phase 2 — Treat (Turn 2, ONLY on confirmation)
 

@@ -28,6 +28,14 @@ def test_email_triage_enforces_zero_unread_and_validation_before_mutation():
     assert "In-Flight Manifest" in text
 
 
+def test_email_triage_stays_under_dispatch_prompt_budget():
+    text = _skill_text("skills/email-triage/SKILL.md")
+    assert len(text) <= 11000, (
+        "email-triage is part of Cowork scheduled dispatch. Keep the default "
+        "skill body compact so bridge sessions do not bloat as quickly."
+    )
+
+
 def test_end_of_day_requires_brain_dump_prompt_and_session_log():
     text = _skill_text("skills/end-of-day/SKILL.md")
     assert "Prompt for Brain Dump" in text

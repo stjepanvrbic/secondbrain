@@ -158,6 +158,33 @@ Cowork's marketplace is server-managed (marketplaceId-based). The plugin is NOT 
 |------|-------|-------|---------|
 | Claude Code config | `~/.claude/` | `~/.claude/` | `%USERPROFILE%\.claude\` |
 | Cowork desktop config | `~/Library/Application Support/Claude/` | `~/.config/Claude/` | `%APPDATA%\Claude\` |
+| Cowork bridge state | `~/Library/Application Support/Claude/bridge-state.json` | `~/.config/Claude/bridge-state.json` | `%APPDATA%\Claude\bridge-state.json` |
+| Cowork local sessions | `~/Library/Application Support/Claude/local-agent-mode-sessions/` | `~/.config/Claude/local-agent-mode-sessions/` | `%APPDATA%\Claude\local-agent-mode-sessions\` |
 | Scheduled tasks (Code) | `~/Documents/Claude/Scheduled/` | `~/Documents/Claude/Scheduled/` | `%USERPROFILE%\Documents\Claude\Scheduled\` |
 | Obsidian config | `~/Library/Application Support/obsidian/` | `~/.config/obsidian/` | `%APPDATA%\obsidian\` |
 | Obsidian CLI | `/usr/local/bin/obsidian` | `/usr/bin/obsidian` or `/snap/bin/obsidian` | In PATH after install |
+
+## Cowork dispatch overflow
+
+If scheduled dispatch reports `Prompt is too long` while ordinary chat still
+works, the likely failure is Cowork's long-lived dispatch bridge state rather
+than vault health.
+
+Relevant files:
+
+- `bridge-state.json` maps the current Cowork runtime session to the active
+  `local_ditto_*` bridge session.
+- `local-agent-mode-sessions/.../agent/local_ditto_*/audit.jsonl` contains the
+  actual bridge transcript and usage growth.
+
+`/secondbrain:dream-protocol` repairs vault state only. It does not clear
+Cowork bridge state. Updating or reinstalling the plugin also does not rotate
+an already bloated bridge session.
+
+Manual recovery path:
+
+1. Quit Claude Desktop completely.
+2. Back up `bridge-state.json`.
+3. Back up or rename `local-agent-mode-sessions/`.
+4. Reopen Claude Desktop.
+5. Retry one scheduled dispatch task.

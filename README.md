@@ -206,6 +206,25 @@ Cowork is sandboxed — it can only access folders listed in `preferences.localA
 
 Cowork's scheduled tasks only run when Claude Desktop is open AND your computer is awake. If you close your laptop overnight, the 2am dream-protocol won't fire — it'll run the next time Claude Desktop is open. This is a Cowork limitation, not a plugin bug.
 
+### "Dispatch says `Prompt is too long`"
+
+If this only happens on scheduled dispatch/reporting and not in ordinary chat,
+the likely issue is Cowork's cached dispatch bridge session, not the vault.
+
+- Run `/secondbrain:doctor` first. It now checks Cowork bridge-state and warns
+  when the active dispatch bridge looks bloated.
+- `/secondbrain:dream-protocol` repairs vault state only. It does not reset the
+  Cowork bridge.
+- Plugin reinstall/update also does not clear an already bloated bridge session.
+
+Manual recovery:
+
+1. Quit Claude Desktop completely.
+2. Back up `~/Library/Application Support/Claude/bridge-state.json`.
+3. Back up or rename `~/Library/Application Support/Claude/local-agent-mode-sessions/`.
+4. Reopen Claude Desktop.
+5. Retry one scheduled task.
+
 ### "I want to install the plugin in Cowork but `/plugin install` doesn't work"
 
 Cowork doesn't support direct GitHub install for individual users — only organization marketplaces do. Use the manual ZIP upload flow described in "Quick start — Claude Cowork" above.

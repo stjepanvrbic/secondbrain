@@ -174,6 +174,8 @@ to.
 
 Brief summary of what was consolidated, updated, or pruned. If nothing changed, say so.
 Do not claim success unless the final health target was reached.
+Keep the scheduled-task response compact: counts, verification state, and at
+most 1 next-focus hint.
 
 ```
 dream-protocol completed: [ISO timestamp]

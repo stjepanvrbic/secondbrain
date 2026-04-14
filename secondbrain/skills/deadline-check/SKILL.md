@@ -57,6 +57,9 @@ Write to brain/status.md:
 - CRITICAL: [task] [[entity]] — due [date]
 ```
 
+Final scheduled-task response must stay compact: one counts block plus at most
+2 named tasks. No long lists.
+
 # Error Handling
 
 - No tasks with due dates: note "no deadline-bearing tasks found — tasks may need [due::] fields"

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sys
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator, Optional
 from unittest.mock import MagicMock
@@ -28,6 +29,7 @@ import setup_steps  # pyright: ignore[reportMissingImports]  # noqa: E402
 from doctor_checks import (  # pyright: ignore[reportMissingImports]
     CheckResult,
     check_core_hooks_path,
+    check_cowork_dispatch_bridge,
     check_environment,
     check_hot_memory_schema,
     check_ingest_log_recent_failures,
@@ -118,9 +120,80 @@ def mock_mcp_client() -> MagicMock:
 @pytest.fixture
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Clear OBSIDIAN_API_KEY / OBSIDIAN_MCP_PORT / CLAUDE_PLUGIN_ROOT for deterministic tests."""
-    for var in ("OBSIDIAN_API_KEY", "OBSIDIAN_MCP_PORT", "CLAUDE_PLUGIN_ROOT"):
+    for var in (
+        "OBSIDIAN_API_KEY",
+        "OBSIDIAN_MCP_PORT",
+        "CLAUDE_PLUGIN_ROOT",
+        "SECONDBRAIN_CLAUDE_DESKTOP_CONFIG",
+    ):
         monkeypatch.delenv(var, raising=False)
     yield
+
+
+@pytest.fixture
+def cowork_runtime(tmp_path: Path) -> dict[str, Path | str]:
+    """A minimal Cowork app-state + runtime layout for bridge-state tests."""
+    app_root = tmp_path / "Claude"
+    app_root.mkdir()
+    (app_root / "claude_desktop_config.json").write_text(json.dumps({"mcpServers": {}}))
+
+    workspace_id = "workspace-123"
+    runtime_session_id = "session-456"
+    local_session_id = f"local_ditto_{runtime_session_id}"
+    plugin_root = (
+        app_root
+        / "local-agent-mode-sessions"
+        / workspace_id
+        / runtime_session_id
+        / "rpm"
+        / "plugin_test"
+        / "secondbrain"
+    )
+    (plugin_root / ".claude-plugin").mkdir(parents=True)
+    (plugin_root / "scripts").mkdir(parents=True, exist_ok=True)
+    (plugin_root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": "secondbrain",
+                "version": "3.5.17",
+                "repository": "https://github.com/stjepanvrbic/secondbrain",
+            }
+        )
+    )
+
+    audit_path = (
+        app_root
+        / "local-agent-mode-sessions"
+        / workspace_id
+        / runtime_session_id
+        / "agent"
+        / local_session_id
+        / "audit.jsonl"
+    )
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    bridge_key = f"{runtime_session_id}:{workspace_id}"
+    (app_root / "bridge-state.json").write_text(
+        json.dumps(
+            {
+                bridge_key: {
+                    "enabled": True,
+                    "userConsented": True,
+                    "localSessionId": local_session_id,
+                }
+            },
+            indent=2,
+        )
+    )
+
+    return {
+        "app_root": app_root,
+        "desktop_config_path": app_root / "claude_desktop_config.json",
+        "plugin_root": plugin_root,
+        "workspace_id": workspace_id,
+        "runtime_session_id": runtime_session_id,
+        "local_session_id": local_session_id,
+        "audit_path": audit_path,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -703,6 +776,148 @@ class TestCheckScheduledTasks:
 
 
 # ---------------------------------------------------------------------------
+# check_cowork_dispatch_bridge — Cowork bridge overflow diagnostics
+# ---------------------------------------------------------------------------
+
+class TestCheckCoworkDispatchBridge:
+    def _write_audit(self, audit_path: Path, *entries: dict) -> None:
+        audit_path.write_text("".join(json.dumps(entry) + "\n" for entry in entries))
+
+    def test_passes_in_code_mode(
+        self,
+        tmp_path: Path,
+        clean_env: None,
+    ):
+        del clean_env
+        r = check_cowork_dispatch_bridge(
+            environment="code",
+            plugin_root=tmp_path,
+        )
+        assert r.status == "pass"
+        assert "cowork" in r.message.lower()
+
+    def test_warns_when_prompt_too_long_seen(
+        self,
+        cowork_runtime: dict[str, Path | str],
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv(
+            "SECONDBRAIN_CLAUDE_DESKTOP_CONFIG",
+            str(cowork_runtime["desktop_config_path"]),
+        )
+        self._write_audit(
+            cowork_runtime["audit_path"],  # type: ignore[arg-type]
+            {
+                "type": "system",
+                "subtype": "init",
+                "session_id": "bridge-session",
+                "_audit_timestamp": "2026-04-13T17:00:00.000Z",
+            },
+            {
+                "type": "assistant",
+                "session_id": "bridge-session",
+                "error": "invalid_request",
+                "message": {
+                    "content": [{"type": "text", "text": "Prompt is too long"}],
+                },
+                "_audit_timestamp": "2026-04-13T19:09:16.362Z",
+            },
+        )
+
+        r = check_cowork_dispatch_bridge(
+            environment="cowork",
+            plugin_root=cowork_runtime["plugin_root"],  # type: ignore[arg-type]
+        )
+        assert r.status == "warning"
+        assert "Prompt is too long" in r.message
+        assert "quit Claude Desktop" in r.message
+
+    def test_warns_when_cache_read_tokens_are_huge(
+        self,
+        cowork_runtime: dict[str, Path | str],
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv(
+            "SECONDBRAIN_CLAUDE_DESKTOP_CONFIG",
+            str(cowork_runtime["desktop_config_path"]),
+        )
+        self._write_audit(
+            cowork_runtime["audit_path"],  # type: ignore[arg-type]
+            {
+                "type": "system",
+                "subtype": "init",
+                "session_id": "bridge-session",
+                "_audit_timestamp": "2026-04-13T17:00:00.000Z",
+            },
+            {
+                "type": "result",
+                "subtype": "success",
+                "session_id": "bridge-session",
+                "usage": {"cache_read_input_tokens": 500001},
+                "_audit_timestamp": "2026-04-13T17:24:24.781Z",
+            },
+        )
+
+        r = check_cowork_dispatch_bridge(
+            environment="cowork",
+            plugin_root=cowork_runtime["plugin_root"],  # type: ignore[arg-type]
+        )
+        assert r.status == "warning"
+        assert "500001" in r.message
+
+    def test_warns_when_bridge_session_is_old(
+        self,
+        cowork_runtime: dict[str, Path | str],
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv(
+            "SECONDBRAIN_CLAUDE_DESKTOP_CONFIG",
+            str(cowork_runtime["desktop_config_path"]),
+        )
+        started_at = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat().replace("+00:00", "Z")
+        self._write_audit(
+            cowork_runtime["audit_path"],  # type: ignore[arg-type]
+            {
+                "type": "system",
+                "subtype": "init",
+                "session_id": "bridge-session",
+                "_audit_timestamp": started_at,
+            },
+            {
+                "type": "result",
+                "subtype": "success",
+                "session_id": "bridge-session",
+                "usage": {"cache_read_input_tokens": 1200},
+                "_audit_timestamp": "2026-04-14T12:00:00.000Z",
+            },
+        )
+
+        r = check_cowork_dispatch_bridge(
+            environment="cowork",
+            plugin_root=cowork_runtime["plugin_root"],  # type: ignore[arg-type]
+        )
+        assert r.status == "warning"
+        assert "7 days" in r.message
+
+    def test_passes_when_no_bridge_mapping_exists(
+        self,
+        cowork_runtime: dict[str, Path | str],
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv(
+            "SECONDBRAIN_CLAUDE_DESKTOP_CONFIG",
+            str(cowork_runtime["desktop_config_path"]),
+        )
+        (cowork_runtime["app_root"] / "bridge-state.json").write_text("{}")  # type: ignore[operator]
+
+        r = check_cowork_dispatch_bridge(
+            environment="cowork",
+            plugin_root=cowork_runtime["plugin_root"],  # type: ignore[arg-type]
+        )
+        assert r.status == "pass"
+
+
+# ---------------------------------------------------------------------------
 # check_last_dream_protocol_run — Check 13
 # ---------------------------------------------------------------------------
 
@@ -1156,6 +1371,36 @@ class TestRunAllChecks:
         assert by_name["obsidian_mcp_port"].status == "pass"
         assert by_name["obsidian_running"].status == "pass"
         assert by_name["mcp_connection"].status == "pass"
+
+    def test_cowork_dispatch_bridge_included_even_when_vault_unreachable(
+        self,
+        cowork_runtime: dict[str, Path | str],
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv(
+            "SECONDBRAIN_CLAUDE_DESKTOP_CONFIG",
+            str(cowork_runtime["desktop_config_path"]),
+        )
+        Path(cowork_runtime["audit_path"]).write_text(
+            json.dumps(
+                {
+                    "type": "system",
+                    "subtype": "init",
+                    "session_id": "bridge-session",
+                    "_audit_timestamp": "2026-04-14T12:00:00.000Z",
+                }
+            )
+            + "\n"
+        )
+        missing_vault = Path(cowork_runtime["app_root"]) / "missing-vault"
+        results = run_all_checks(
+            vault_path=missing_vault,
+            plugin_root=Path(cowork_runtime["plugin_root"]),
+            environment="cowork",
+        )
+        by_name = {r.name: r for r in results}
+        assert "cowork_dispatch_bridge" in by_name
+        assert by_name["vault_reachable"].status == "fail"
 
 
 # ---------------------------------------------------------------------------

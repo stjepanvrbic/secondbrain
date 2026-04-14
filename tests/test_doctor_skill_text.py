@@ -161,6 +161,9 @@ class TestFixableVsEscalationListed:
         assert "install_git_hooks.py" in content, (
             "Skill must mention install_git_hooks.py for the core.hooksPath escalation."
         )
+        assert "cowork_dispatch_bridge" in content, (
+            "Skill must mention the Cowork bridge-overflow escalation check."
+        )
 
 
 class TestNoStaleInitDispatch:
@@ -208,6 +211,7 @@ class TestChecksExistAndMatch:
             "profile",
             "standard_folders",
             "vault_identity_cross",
+            "cowork_dispatch_bridge",
         )
         missing = [n for n in check_names if n not in content]
         assert not missing, (
