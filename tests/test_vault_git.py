@@ -70,6 +70,23 @@ def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess:
     )
 
 
+def _strip_git_identity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Make child git processes behave like a clean Cowork sandbox."""
+    home = tmp_path / "isolated-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("EMAIL", raising=False)
+    for key in (
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+    ):
+        monkeypatch.setenv(key, "")
+
+
 @pytest.fixture
 def fresh_repo(tmp_path: Path) -> Path:
     """An empty directory with `git init` already run and an initial dummy
@@ -257,6 +274,27 @@ class TestInitialCommit:
         cp = _git("log", "-1", "--format=%s", cwd=empty_vault)
         assert cp.stdout.strip() == "Initial secondbrain vault scaffolding"
 
+    def test_succeeds_without_global_git_identity(
+        self,
+        empty_vault: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
+        _git("init", "-q", cwd=empty_vault)
+        _git("checkout", "-q", "-b", "main", cwd=empty_vault)
+        (empty_vault / "log.md").write_text("# Log\n")
+        _strip_git_identity(monkeypatch, tmp_path)
+
+        result = initial_commit(empty_vault)
+
+        assert result.success is True
+        cp = _git("log", "-1", "--format=%an <%ae>|%cn <%ce>", cwd=empty_vault)
+        assert cp.returncode == 0
+        assert cp.stdout.strip() == (
+            "Claude (secondbrain) <noreply@secondbrain.local>|"
+            "Claude (secondbrain) <noreply@secondbrain.local>"
+        )
+
     def test_nonexistent_vault_fails(self, tmp_path: Path):
         result = initial_commit(tmp_path / "nope")
         assert result.success is False
@@ -342,6 +380,29 @@ class TestCommitChanges:
         commit_changes(fresh_repo, "test", author=custom)
         cp = _git("log", "-1", "--format=%an <%ae>", cwd=fresh_repo)
         assert cp.stdout.strip() == custom
+
+    def test_succeeds_without_global_git_identity(
+        self,
+        empty_vault: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
+        _git("init", "-q", cwd=empty_vault)
+        _git("checkout", "-q", "-b", "main", cwd=empty_vault)
+        (empty_vault / "seed.md").write_text("# seed\n")
+        _git("add", "seed.md", cwd=empty_vault)
+        _git("commit", "-q", "-m", "seed commit", cwd=empty_vault)
+        (empty_vault / "seed.md").write_text("# seed\n\nmore\n")
+        _strip_git_identity(monkeypatch, tmp_path)
+
+        result = commit_changes(empty_vault, "checkpoint")
+
+        assert result.success is True
+        cp = _git("log", "-1", "--format=%s|%cn <%ce>", cwd=empty_vault)
+        assert cp.returncode == 0
+        assert cp.stdout.strip() == (
+            "checkpoint|Claude (secondbrain) <noreply@secondbrain.local>"
+        )
 
     def test_push_no_remote_succeeds_but_reports_push_failure(
         self, fresh_repo: Path

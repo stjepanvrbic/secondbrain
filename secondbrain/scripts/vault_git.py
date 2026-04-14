@@ -26,6 +26,8 @@ Python 3.8+, zero external dependencies beyond the git CLI.
 from __future__ import annotations
 
 import argparse
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -138,6 +140,7 @@ def _run_git(
     vault_path: Path,
     args: List[str],
     *,
+    env: Optional[dict[str, str]] = None,
     check: bool = False,
 ) -> subprocess.CompletedProcess:
     """Run a git command with `cwd=vault_path` and return the CompletedProcess.
@@ -149,10 +152,38 @@ def _run_git(
     return subprocess.run(
         ["git", *args],
         cwd=str(vault_path),
+        env={**os.environ, **(env or {})},
         capture_output=True,
         text=True,
         check=check,
     )
+
+
+_IDENT_RE = re.compile(r"^(?P<name>.+?)\s*<(?P<email>[^>]+)>$")
+
+
+def _fallback_committer_env(vault_path: Path, author: str) -> dict[str, str]:
+    """Return env overrides only when git cannot resolve a committer ident.
+
+    Cowork's sandbox may export blank GIT_* identity variables and omit the
+    user's global ~/.gitconfig. In that state `git commit --author ...` still
+    fails because git resolves author and committer separately. We preserve the
+    user's real committer identity whenever git can resolve one; otherwise we
+    fall back to the same identity as `author` so automated commits stay
+    non-interactive and deterministic.
+    """
+    ident = _run_git(vault_path, ["var", "GIT_COMMITTER_IDENT"])
+    if ident.returncode == 0:
+        return {}
+
+    match = _IDENT_RE.match(author.strip())
+    if not match:
+        return {}
+
+    return {
+        "GIT_COMMITTER_NAME": match.group("name").strip(),
+        "GIT_COMMITTER_EMAIL": match.group("email").strip(),
+    }
 
 
 def _ensure_vault_exists(vault_path: Path) -> Optional["StepResult"]:
@@ -445,6 +476,7 @@ def initial_commit(
             author,
             "--allow-empty",
         ],
+        env=_fallback_committer_env(vault_path, author),
     )
     if commit.returncode != 0:
         return _step_result(
@@ -536,6 +568,7 @@ def commit_changes(
     commit = _run_git(
         vault_path,
         ["commit", "-q", "-m", message, "--author", author],
+        env=_fallback_committer_env(vault_path, author),
     )
     if commit.returncode != 0:
         return _step_result(
