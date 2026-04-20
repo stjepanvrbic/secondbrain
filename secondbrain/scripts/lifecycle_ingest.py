@@ -15,12 +15,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shlex
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 
 BATCH_EXCHANGE_THRESHOLD = 5
@@ -113,10 +112,6 @@ def _append_multiline_log(log_path: Path, header: str, body: str) -> None:
             fh.write("\n")
     except Exception:
         pass
-
-
-def _git_enabled(vault_path: Path) -> bool:
-    return (vault_path / ".git").exists()
 
 
 def _safe_session_id(session_id: str) -> str:
@@ -313,37 +308,6 @@ def _maybe_dispatch(event: str, payload: dict[str, Any], vault_path: Path) -> No
         )
 
 
-def _run_commit_stop(vault_path: Path, with_push: bool, log_path: Path) -> None:
-    if not _git_enabled(vault_path):
-        return
-    script = _script_path("vault_git.py")
-    if not script.is_file():
-        return
-    cmd = [
-        sys.executable,
-        str(script),
-        "commit-stop",
-        "--vault",
-        str(vault_path),
-        "--message",
-        "Session checkpoint",
-    ]
-    if with_push:
-        cmd.append("--push")
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    combined = "".join(part for part in (result.stdout, result.stderr) if part)
-    _append_multiline_log(
-        log_path,
-        f"on-stop | commit-stop (rc={result.returncode}, push={'push' if with_push else 'nopush'})",
-        combined,
-    )
-
-
 def _handle_stop_hook() -> int:
     payload = _parse_stdin_payload()
     if bool(payload.get("stop_hook_active", False)):
@@ -352,8 +316,6 @@ def _handle_stop_hook() -> int:
     if entry is None:
         return 0
     vault_path = Path(str(entry["path"])).expanduser()
-    log_path = _log_path(vault_path)
-    _run_commit_stop(vault_path, bool(entry.get("with_push", False)), log_path)
     _maybe_dispatch("stop", payload, vault_path)
     return 0
 

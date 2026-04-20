@@ -10,8 +10,7 @@ invocation loads. The subagent:
        deadlines, entities, etc.).
     3. Builds a hot-memory update draft and applies it via update_hot_memory.py.
     4. Advances the per-session cursor via advance_cursor.py.
-    5. Commits the result via vault_git.py commit-stop.
-    6. NEVER talks to the user.
+    5. NEVER talks to the user.
 
 This test file locks the contract of that definition file. Drift kills
 background ingest silently — the Stop hook returns success, the detached
@@ -27,8 +26,7 @@ prose, we're enforcing the shape):
       the subagent needs. It does NOT need Edit/Write/Task — those are
       forbidden and MUST appear in disallowedTools.
     - Body mentions the script commands the subagent must call
-      (update_hot_memory.py --apply, advance_cursor.py, vault_git.py
-      commit-stop).
+      (update_hot_memory.py --apply, advance_cursor.py).
     - Body documents the hot-memory update sections (Top Deadlines,
       Urgent This Week, Recent Activity).
     - Body documents the cursor-advancement discipline.
@@ -117,8 +115,7 @@ class TestFrontmatterFields:
         assert "Read" in frontmatter
 
     def test_tools_allowlist_has_bash(self, frontmatter: str):
-        # Subagent calls update_hot_memory.py / advance_cursor.py / vault_git.py
-        # via Bash.
+        # Subagent calls update_hot_memory.py / advance_cursor.py via Bash.
         assert "Bash" in frontmatter
 
     def test_tools_allowlist_has_mcp_vault_create(self, frontmatter: str):
@@ -253,16 +250,6 @@ class TestBodyMentionsCursorAdvancement:
         # Used as --to-message-uuid when calling advance_cursor.py
         low = body.lower()
         assert "message-uuid" in low or "to-message-uuid" in low
-
-
-class TestBodyMentionsCommit:
-    def test_body_mentions_vault_git_commit_stop(self, body: str):
-        assert "vault_git.py" in body
-        assert "commit-stop" in body
-
-    def test_body_mentions_author(self, body: str):
-        # --author flag is required for the ingester's commits.
-        assert "--author" in body
 
 
 class TestBodyForbiddenActions:

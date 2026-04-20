@@ -131,7 +131,8 @@ v3 introduces a **script-first architecture**: deterministic tasks are handled b
 | `scripts/init_obsidian.py` | Automated setup — installs Obsidian, plugins, configures MCP, scaffolds vault |
 | `scripts/setup_steps.py` | Shared setup primitives used by both init and doctor (env vars, scaffolding, vault config, marker UUID) |
 | `scripts/connect_mcp_client.py` | HTTP wrapper around the Connect MCP API — lets scripts talk to Obsidian without going through Claude's tool layer |
-| `scripts/vault_git.py` | Git operations on the vault — init, commit, push, reset. CLI subcommands for hooks and skills. |
+| `scripts/cleanup_session_activity_spam.py` | Strips legacy `session-activity \| checkpoint` entries from `log.md`. Invoked by doctor treatment and by dream-protocol Phase 0 (threshold 10k). |
+| `scripts/reclaim_vault_git_space.py` | User-invoked utility to remove a legacy `<vault>/.git` directory. Vault git versioning was removed in v3.6 — Syncthing/Drive own backup now. |
 | `scripts/doctor_checks.py` | Check engine for `/secondbrain:doctor` — diagnose-then-treat with dependency ordering |
 | `scripts/doctor_report.py` | Merges raw subprocess doctor JSON with stronger session-layer results and renders the final report |
 | `scripts/runtime_resolver.py` | Shared vaults.json, Claude Desktop config, and Obsidian MCP runtime resolution |
@@ -164,7 +165,7 @@ The architecture borrows the three-layer model from [Andrej Karpathy's gist on p
 
 ## Skills
 
-The plugin ships 13 skills. Most run automatically — you rarely invoke them by name.
+The plugin ships 12 skills. Most run automatically — you rarely invoke them by name.
 
 | Skill | Auto-invoked when |
 |---|---|
@@ -180,7 +181,6 @@ The plugin ships 13 skills. Most run automatically — you rarely invoke them by
 | `weekly-review` | Scheduled Sunday 8pm |
 | `dream-protocol` | Scheduled 2am |
 | `vault-review` | You ask for a manual audit |
-| `undo-last-turn` | You ask to undo the last turn's vault changes |
 
 ---
 

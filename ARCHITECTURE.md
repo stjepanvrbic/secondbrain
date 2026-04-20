@@ -173,7 +173,6 @@ The plugin ships 13 skills. Most run automatically when a relevant trigger fires
 | `weekly-review` | Full Sunday audit, build next week's plan | Scheduled Sunday 8pm |
 | `dream-protocol` | Nightly vault maintenance — lint, consolidate, rebuild manifest, regenerate `brain/hot-memory.md` | Scheduled 2am (nightly) or invoked by `init` for first-time setup |
 | `vault-review` | On-demand vault audit (focused deadline review or full weekly audit) | User asks "how am I doing?", "what's overdue?", "audit my tasks", etc. |
-| `undo-last-turn` | Git-based recovery for "the last commit was wrong". Resets the vault to the previous Stop-hook commit | User asks to undo the last turn |
 
 Everything except `init` and `doctor` runs automatically based on hooks, schedules, and conversational triggers — the routing rules are injected by the `SessionStart` hook (via the nightly-built `brain/hot-memory.md`). Developer documentation lives in `secondbrain/docs/session-start-architecture.md`.
 

@@ -50,7 +50,6 @@ VAULT_TOUCHING_SCRIPTS = {
     "update_hot_memory.py",
     "create_entity_stubs.py",
     "init_obsidian.py",
-    "vault_git.py",
     "verify_vault.py",
 }
 

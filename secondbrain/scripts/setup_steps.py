@@ -761,6 +761,63 @@ def create_log_md(vault_path: Path) -> StepResult:
     )
 
 
+def cleanup_session_activity_spam(vault_path: Path) -> StepResult:
+    """Strip legacy `session-activity | checkpoint` entries from log.md.
+
+    Used by doctor when `check_log_md_bloat` flags the vault. The actual
+    stripping logic lives in `scripts/cleanup_session_activity_spam.py`
+    (stdlib-only, idempotent). This helper is the StepResult-returning
+    shim that doctor dispatches to.
+    """
+    log_path = vault_path / "log.md"
+    if not log_path.is_file():
+        return StepResult(
+            success=True,
+            message=f"cleanup_session_activity_spam: no log.md at {log_path}",
+            did_work=False,
+        )
+
+    # Import lazily: the module is pure stdlib and self-contained.
+    import cleanup_session_activity_spam as cleanup  # type: ignore[reportMissingImports]  # noqa: PLC0415
+
+    try:
+        original = log_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return StepResult(
+            success=False,
+            message="cleanup_session_activity_spam: could not read log.md",
+            did_work=False,
+            error=str(exc),
+        )
+
+    cleaned, matches = cleanup.clean(original)
+    if matches == 0:
+        return StepResult(
+            success=True,
+            message="cleanup_session_activity_spam: nothing to clean",
+            did_work=False,
+        )
+
+    try:
+        log_path.write_text(cleaned, encoding="utf-8")
+    except OSError as exc:
+        return StepResult(
+            success=False,
+            message="cleanup_session_activity_spam: could not write log.md",
+            did_work=False,
+            error=str(exc),
+        )
+
+    return StepResult(
+        success=True,
+        message=(
+            f"cleanup_session_activity_spam: removed {matches} legacy "
+            "entries from log.md"
+        ),
+        did_work=True,
+    )
+
+
 def create_hot_memory_initial(vault_path: Path) -> StepResult:
     """Seed `${vault_path}/brain/hot-memory.md` from the T10 INITIAL_TEMPLATE.
 
@@ -1040,233 +1097,3 @@ def setup_profile(vault_path: Path, interactive: bool = True) -> StepResult:
     )
 
 
-# ---------------------------------------------------------------------------
-# setup_git — Phase 2 init→git integration
-#
-# setup_git is called from the init skill's Step 4a AND by doctor treatment
-# when a managed vault's git state has drifted (missing .gitignore, no
-# initial commit, etc.). Like every other setup_steps helper it's idempotent
-# and returns StepResult so the caller can uniformly report "already set
-# up" vs "just fixed".
-#
-# Why this lives in setup_steps and not vault_git: the composition
-# (init → gitignore → initial commit → optional remote → optional push)
-# is setup policy, not a git primitive. vault_git owns the primitives;
-# setup_steps owns the order those primitives run in during init/doctor.
-# ---------------------------------------------------------------------------
-
-def setup_git(
-    vault_path: Path,
-    *,
-    with_remote: bool = False,
-    remote_url: Optional[str] = None,
-    with_push: bool = False,
-    dry_run: bool = False,
-) -> StepResult:
-    """Idempotent git setup for a vault.
-
-    Runs each step of the T8 init→git flow in order, tracking whether any
-    step actually changed state. Returns success=True if the vault is now
-    a git repo with at least one commit.
-
-    Steps (each delegated to a vault_git helper):
-
-      1. If not already a git repo, run `vault_git.init_repo()`
-      2. Write the default `.gitignore` via `vault_git.write_gitignore()`
-      3. If the repo has zero commits, run `vault_git.initial_commit()`
-      4. If `with_remote=True` AND `remote_url` is provided, add an `origin`
-         remote pointing at it (via `vault_git.init_repo(with_remote=True,
-         remote_url=...)` re-invoked on an already-initialized repo — or
-         added directly via subprocess when the repo existed before us)
-      5. If `with_remote` AND `with_push`, run `git push -u origin HEAD`
-         and treat a push failure as a soft warning — local commits are
-         still durable, so we leave `success=True` and record the push
-         error in `message`.
-
-    `dry_run=True` makes every step a no-op but still reports what would
-    have happened.
-
-    Nothing about this function writes to `vaults.json`. That's the init
-    skill's responsibility (via `add_vault_to_config(..., with_push=...)`)
-    and keeps setup_steps from having to know which vault_id corresponds
-    to `vault_path`. setup_git is a local-state operator; vaults.json is
-    global state.
-    """
-    # Lazy import so setup_steps stays importable without dragging the
-    # full vault_git module (which pulls subprocess + shutil at top level)
-    # into any consumer that never touches git. Deliberate: keeps doctor
-    # and init_obsidian's import surface small.
-    from vault_git import (  # type: ignore[reportMissingImports]  # noqa: PLC0415
-        init_repo,
-        initial_commit,
-        is_git_repo,
-        write_gitignore,
-    )
-
-    # Pre-flight: vault must exist.
-    if not vault_path.exists():
-        return StepResult(
-            success=False,
-            message=f"setup_git: vault path does not exist: {vault_path}",
-            did_work=False,
-            error=f"vault path does not exist: {vault_path}",
-        )
-    if not vault_path.is_dir():
-        return StepResult(
-            success=False,
-            message=f"setup_git: vault path is not a directory: {vault_path}",
-            did_work=False,
-            error=f"vault path is not a directory: {vault_path}",
-        )
-
-    did_any_work = False
-    push_warning: Optional[str] = None
-
-    # Step 1: init_repo (unless already a repo).
-    #
-    # We pass with_remote/remote_url through to init_repo so a fresh init
-    # and a remote-add land in a single call. For an already-initialized
-    # repo init_repo short-circuits and we handle the remote separately
-    # below so we still get the opt-in behavior.
-    already_repo = is_git_repo(vault_path)
-    if not already_repo:
-        init_result = init_repo(
-            vault_path,
-            with_remote=with_remote,
-            remote_url=remote_url if with_remote else None,
-            dry_run=dry_run,
-        )
-        if not init_result.success:
-            return StepResult(
-                success=False,
-                message=f"setup_git: init_repo failed: {init_result.message}",
-                did_work=init_result.did_work,
-                error=init_result.error,
-            )
-        did_any_work = did_any_work or init_result.did_work
-
-    # Step 2: write_gitignore (always run — it's idempotent).
-    gi_result = write_gitignore(vault_path, dry_run=dry_run)
-    if not gi_result.success:
-        return StepResult(
-            success=False,
-            message=f"setup_git: write_gitignore failed: {gi_result.message}",
-            did_work=did_any_work or gi_result.did_work,
-            error=gi_result.error,
-        )
-    did_any_work = did_any_work or gi_result.did_work
-
-    # Step 3: initial_commit if zero commits exist.
-    #
-    # initial_commit short-circuits cleanly on a repo that already has
-    # commits (returns success=True, did_work=False), so we can call it
-    # unconditionally without clobbering user history.
-    if not dry_run:
-        ic_result = initial_commit(vault_path)
-        if not ic_result.success:
-            return StepResult(
-                success=False,
-                message=f"setup_git: initial_commit failed: {ic_result.message}",
-                did_work=did_any_work or ic_result.did_work,
-                error=ic_result.error,
-            )
-        did_any_work = did_any_work or ic_result.did_work
-
-    # Step 4: if the repo existed before we got here AND the caller asked
-    # for a remote, add origin directly. init_repo only adds the remote on
-    # a fresh init (deliberate: it doesn't clobber existing remote config),
-    # so we handle the pre-existing-repo case here. Missing URL is a no-op.
-    if (
-        with_remote
-        and remote_url
-        and already_repo
-        and not dry_run
-    ):
-        import shutil  # noqa: PLC0415 — lazy, avoid top-level dep cost
-        import subprocess  # noqa: PLC0415
-
-        if shutil.which("git") is None:
-            return StepResult(
-                success=False,
-                message="setup_git: git not installed",
-                did_work=did_any_work,
-                error="git binary not found on PATH",
-            )
-
-        # Only add origin if it doesn't already exist — we never clobber
-        # the user's existing remote config.
-        check = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            cwd=str(vault_path),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if check.returncode != 0:
-            add = subprocess.run(
-                ["git", "remote", "add", "origin", remote_url],
-                cwd=str(vault_path),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if add.returncode != 0:
-                return StepResult(
-                    success=False,
-                    message="setup_git: git remote add origin failed",
-                    did_work=did_any_work,
-                    error=(add.stderr or add.stdout).strip() or "git remote add failed",
-                )
-            did_any_work = True
-
-    # Step 5: optional push. Fail-soft — we prefer a durable local commit
-    # over a hard failure on a flaky remote. The push error goes into the
-    # returned message so callers/tests can observe it, but success stays
-    # True.
-    if with_remote and remote_url and with_push and not dry_run:
-        import shutil  # noqa: PLC0415
-        import subprocess  # noqa: PLC0415
-
-        if shutil.which("git") is None:
-            return StepResult(
-                success=False,
-                message="setup_git: git not installed",
-                did_work=did_any_work,
-                error="git binary not found on PATH",
-            )
-
-        push = subprocess.run(
-            ["git", "push", "-u", "origin", "HEAD"],
-            cwd=str(vault_path),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if push.returncode != 0:
-            push_warning = (push.stderr or push.stdout).strip() or "git push failed"
-        else:
-            did_any_work = True
-
-    # Final status message.
-    if dry_run:
-        return StepResult(
-            success=True,
-            message=f"setup_git: would initialize git in {vault_path}",
-            did_work=False,
-        )
-
-    if push_warning is not None:
-        return StepResult(
-            success=True,  # local state is good; push is the soft failure
-            message=(
-                f"setup_git: initialized {vault_path} "
-                f"(push failed: {push_warning})"
-            ),
-            did_work=did_any_work,
-        )
-
-    return StepResult(
-        success=True,
-        message=f"setup_git: initialized {vault_path}",
-        did_work=did_any_work,
-    )

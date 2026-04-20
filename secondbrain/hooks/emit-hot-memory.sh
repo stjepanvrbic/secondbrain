@@ -129,42 +129,55 @@ if [ -z "${ACTIVE_VAULT}" ]; then
     ACTIVE_VAULT="__SECONDBRAIN_UNCONFIGURED__"
 fi
 
-# ---------------------------------------------------------------------------
-# Append a session-start entry to log.md so update_hot_memory.py's
-# "Recent Activity" reflects actual session activity. Without this,
-# the agent reports "N days without session" because only dream-protocol
-# writes to log.md (nightly), not sessions.
-# ---------------------------------------------------------------------------
-
-set +e
-python3 - "${ACTIVE_VAULT}" <<'PY'
-import sys
-from datetime import datetime
-from pathlib import Path
-
-vault = Path(sys.argv[1]) if len(sys.argv) > 1 else None
-if not vault or not vault.is_dir():
-    sys.exit(0)
-
-log = vault / "log.md"
-ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-entry = f"\n## [{ts}] session-activity | checkpoint\n"
-
-try:
-    if not log.exists():
-        log.write_text(f"# Log\n{entry}", encoding="utf-8")
-    else:
-        with log.open("a", encoding="utf-8") as f:
-            f.write(entry)
-except Exception:
-    pass
-PY
-set -e
-
 if [ ! -f "${EMITTER}" ]; then
     # Broken plugin layout. Still emit SOMETHING parseable.
     printf '%s\n' '{"systemMessage": "secondbrain emitter script missing. Run /secondbrain:doctor."}'
     exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# If hot-memory.md is older than 12h, kick off refresh_vault_indexes.py in the
+# background. Current session still emits the on-disk (possibly stale) file;
+# the next SessionStart picks up the fresh data. This decouples freshness
+# from dream-protocol — if dream fails, SessionStart self-heals.
+# ---------------------------------------------------------------------------
+
+HOT_MEMORY="${ACTIVE_VAULT}/brain/hot-memory.md"
+REFRESH_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/refresh_vault_indexes.py"
+STALE_THRESHOLD_SEC=43200  # 12 hours
+
+if [ -d "${ACTIVE_VAULT}" ] && [ -f "${REFRESH_SCRIPT}" ]; then
+    # stat -f uses BSD semantics (macOS); -c uses GNU (Linux). Try the BSD
+    # form first, fall back for Linux. Missing file → treat as "infinitely
+    # stale" so the first ever session triggers a regenerate.
+    if MTIME=$(stat -f %m "${HOT_MEMORY}" 2>/dev/null); then :
+    elif MTIME=$(stat -c %Y "${HOT_MEMORY}" 2>/dev/null); then :
+    else MTIME=0
+    fi
+    NOW=$(date +%s)
+    AGE=$((NOW - MTIME))
+    if [ "${AGE}" -gt "${STALE_THRESHOLD_SEC}" ]; then
+        # Fully detached: stdout and stderr go to the ingest-log via the
+        # script itself, and we nohup + background so the hook returns
+        # immediately (SessionStart has a 10s budget).
+        nohup python3 "${REFRESH_SCRIPT}" --vault "${ACTIVE_VAULT}" \
+            >/dev/null 2>&1 &
+        disown 2>/dev/null || true
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Belt-and-suspenders log rotation: if log.md is >10 MB, kick off rotate_log
+# in the background. Dream-protocol owns the nightly age-based rotation;
+# this guard protects users whose dream-protocol is broken.
+# ---------------------------------------------------------------------------
+
+ROTATE_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/rotate_log.py"
+if [ -d "${ACTIVE_VAULT}" ] && [ -f "${ROTATE_SCRIPT}" ]; then
+    nohup python3 "${ROTATE_SCRIPT}" --vault "${ACTIVE_VAULT}" \
+        --max-age-days 30 --max-size-mb 10 \
+        >/dev/null 2>&1 &
+    disown 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------

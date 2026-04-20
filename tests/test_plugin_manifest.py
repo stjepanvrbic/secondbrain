@@ -44,7 +44,7 @@ SKILLS_DIR = PLUGIN_ROOT / "skills"
 # be listed here explicitly.
 CLI_ENTRYPOINT_ALLOWLIST = {
     "bump_version.py",         # dev-only: used by pre-push hook and CI
-    "install_git_hooks.py",    # dev-only: documented in repo-root CONTRIBUTING.md
+    "install_git_hooks.py",    # dev-only: contributor setup for PLUGIN repo's pre-push hook (core.hooksPath); unrelated to vault git
     "lifecycle_ingest.py",     # hook orchestration helper used by shell wrappers
     "run_ingester_job.py",     # detached ingester runner used by lifecycle_ingest.py
     "auto_release.py",         # dev-only: main-branch version bump helper used by GitHub Actions
@@ -56,12 +56,15 @@ CLI_ENTRYPOINT_ALLOWLIST = {
     "doctor_checks.py",        # library-only: imported by doctor_cli (T5)
     "doctor_cli.py",           # CLI entry: invoked by the doctor skill via Bash (T5)
     "doctor_report.py",        # CLI/helper: merges raw doctor JSON with session-layer evidence
-    "vault_git.py",            # CLI entry: invoked by Stop hook + undo-last-turn skill (wired up in T8/T9)
     "hot_memory_schema.py",    # library-only: imported by validate_hot_memory + update_hot_memory (T10)
     "validate_hot_memory.py",  # CLI entry: invoked by doctor/dream-protocol/ingester (wired up in T11/T13)
     "update_hot_memory.py",    # CLI entry: invoked by dream-protocol + ingest subagent (wired up in T11/T13)
     "extract_new_turns.py",    # CLI entry: invoked by secondbrain-ingester subagent (wired up in T13)
     "advance_cursor.py",       # CLI entry: invoked by secondbrain-ingester subagent (wired up in T13)
+    "cleanup_session_activity_spam.py",  # CLI entry: invoked by doctor treatment + dream-protocol Phase 0
+    "reclaim_vault_git_space.py",  # CLI entry: user-invoked utility to remove legacy vault .git
+    "refresh_vault_indexes.py",  # CLI entry: invoked by SessionStart hook when hot-memory is stale
+    "rotate_log.py",  # CLI entry: invoked by dream-protocol Phase 5 + SessionStart (size-gated)
 }
 
 # Dirs the installer SHIPS to users. Nothing under here may contain dev cruft.

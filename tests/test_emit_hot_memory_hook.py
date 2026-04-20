@@ -248,6 +248,42 @@ class TestCwdPropagation:
 
 
 # ---------------------------------------------------------------------------
+# log.md must NOT be touched by SessionStart. Regression guard for the
+# deleted session-activity checkpoint append that once wrote ~16k entries/day.
+# ---------------------------------------------------------------------------
+
+class TestHookDoesNotTouchLog:
+    def test_empty_log_stays_empty(self, scratch: Path):
+        vault = _make_vault(scratch, with_hot_memory=True)
+        log = vault / "log.md"
+        log.write_text("# Log\n", encoding="utf-8")
+        config = scratch / "cfg" / "vaults.json"
+        _write_vaults_config(config, [_make_vault_entry(vault)], active_id="v1")
+
+        before = log.read_bytes()
+        code, _, _ = _run_hook({"cwd": str(vault)}, scratch, vaults_config=config)
+        assert code == 0
+        assert log.read_bytes() == before, (
+            "emit-hot-memory.sh must not append to log.md (regression: "
+            "session-activity checkpoint spam was producing ~16k entries/day)"
+        )
+
+    def test_missing_log_is_not_created(self, scratch: Path):
+        vault = _make_vault(scratch, with_hot_memory=True)
+        log = vault / "log.md"
+        assert not log.exists()
+        config = scratch / "cfg" / "vaults.json"
+        _write_vaults_config(config, [_make_vault_entry(vault)], active_id="v1")
+
+        code, _, _ = _run_hook({"cwd": str(vault)}, scratch, vaults_config=config)
+        assert code == 0
+        assert not log.exists(), (
+            "emit-hot-memory.sh must not create log.md; real operations "
+            "(dream-protocol, session-end, etc.) own log.md writes"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Performance sanity: hook should be fast. Not a hard SLA in CI but a
 # regression guard. <3s is a MASSIVELY generous ceiling covering cold cache,
 # macOS sandbox overhead, and shell startup — real runs land in ~100ms.

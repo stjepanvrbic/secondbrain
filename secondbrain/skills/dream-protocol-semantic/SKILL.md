@@ -6,7 +6,7 @@ description: >
   completed tasks, and resolve contradictions in live state before
   structural verification begins.
 metadata:
-  version: "3.5.26"
+  version: "3.6.0"
 ---
 
 # Core Rule
@@ -26,6 +26,7 @@ worker can verify and finish the run cleanly.
 
 # Responsibilities
 
+- auto-heal severe `log.md` bloat before any log read (Phase 0 of execution pipeline)
 - gather recent signal from inbox, session log, status, and deadlines
 - reconcile contradictory live state
 - promote/demote/archive tasks based on current reality

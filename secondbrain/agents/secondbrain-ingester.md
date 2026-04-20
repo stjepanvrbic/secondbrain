@@ -171,20 +171,6 @@ everything that can fail has already succeeded.
 The explicit brain-dump path has `cursor_path: null` in its envelope —
 skip the cursor advancement entirely in that case.
 
-# Final Commit
-
-After everything above, commit the vault changes via:
-
-```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/vault_git.py" commit-stop \
-    --vault "<vault_path>" \
-    --message "Background ingest from session <session_id>" \
-    --author "Claude (secondbrain) <noreply@secondbrain.local>"
-```
-
-The `--author` flag is mandatory — ingester commits must be
-distinguishable from human-authored commits in the log.
-
 # Logging
 
 Append a one-line entry to `<vault>/.secondbrain/ingest-log.md` at the

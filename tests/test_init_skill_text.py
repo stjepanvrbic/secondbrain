@@ -7,8 +7,7 @@ invariants the skill must uphold:
    never `~/.secondbrain-installed` — the latter is a bug (init_obsidian.py
    writes the marker inside the vault, so checking home dir never finds it).
 2. The dead "If `git init` fails: skip without error" line must be gone —
-   the current init flow has no git init call, and Phase 2 will introduce
-   real git handling via setup_steps.setup_git().
+   vault git versioning was removed in v3.6; there is no git init call.
 """
 
 from __future__ import annotations
@@ -49,6 +48,5 @@ class TestNoDeadGitInit:
         content = SKILL_PATH.read_text()
         assert "If `git init` fails: skip without error" not in content, (
             "The init skill still has orphaned error handling for a git init "
-            "step that doesn't exist. Phase 2 will introduce real git support "
-            "via setup_steps.setup_git(); until then this line is dead code."
+            "step that doesn't exist. Vault git versioning was removed in v3.6."
         )
