@@ -8,7 +8,7 @@ description: >
   reports results, and ONLY on the user's next-turn confirmation invokes
   the treatment phase (Phase 2) for bootstrap fixes. Phase 1 never mutates anything.
 metadata:
-  version: "3.6.2"
+  version: "3.6.3"
 ---
 
 # Core Rule
