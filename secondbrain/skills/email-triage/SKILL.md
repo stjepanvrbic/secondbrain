@@ -6,7 +6,7 @@ description: >
   Fully read every unread email, extract durable signal to the vault, label
   important mail, archive noise, and finish at zero unread.
 metadata:
-  version: "3.6.1"
+  version: "3.6.2"
 ---
 
 # Core Rule

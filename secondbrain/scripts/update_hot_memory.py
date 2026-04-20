@@ -61,7 +61,6 @@ from hot_memory_schema import (  # type: ignore[reportMissingImports]
     parse_sections,
     validate,
 )
-from runtime_resolver import resolve_vaults_config_path  # type: ignore[reportMissingImports]
 
 
 HOT_MEMORY_PATH = "brain/hot-memory.md"
@@ -280,12 +279,21 @@ def _file_pointers_section() -> str:
     return "None yet."
 
 
-def _build_system_alerts(vault_path: Optional[Path]) -> Optional[str]:
+def _build_system_alerts(
+    vault_path: Optional[Path],
+    vaults_config: Optional[Path] = None,
+) -> Optional[str]:
     """Run deterministic health checks and return alerts as a bullet list.
 
     Returns None if no issues found (section is omitted from hot-memory).
     All checks are pure file-existence or version-comparison — zero agent
     reasoning needed.
+
+    `vaults_config` must be supplied explicitly by the CLI entry point so
+    a stray `SECONDBRAIN_VAULTS_CONFIG` env var from a parent shell (or a
+    pytest subprocess) cannot poison the alert with a foreign path. A
+    historical bug baked a pytest-tempdir path into the user's real
+    hot-memory.md because this function resolved ambiently.
     """
     alerts: List[str] = []
 
@@ -297,8 +305,7 @@ def _build_system_alerts(vault_path: Optional[Path]) -> Optional[str]:
                 "may pollute agent context. Safe to delete or archive."
             )
 
-    vaults_config = resolve_vaults_config_path()
-    if not vaults_config.exists():
+    if vaults_config is not None and not vaults_config.exists():
         alerts.append(
             f"`vaults.json` missing at `{vaults_config}` — session hooks disabled (no session logging, "
             "no per-turn commits, no immutability enforcement). "
@@ -310,12 +317,20 @@ def _build_system_alerts(vault_path: Optional[Path]) -> Optional[str]:
     return "\n".join(f"- {a}" for a in alerts)
 
 
-def _build_regenerated_sections(client, vault_path: Optional[Path] = None) -> Dict[str, str]:
+def _build_regenerated_sections(
+    client,
+    vault_path: Optional[Path] = None,
+    vaults_config: Optional[Path] = None,
+) -> Dict[str, str]:
     """Query the vault and build a sections dict.
 
     Missing source files are tolerated — the corresponding section gets a
     placeholder body instead. This keeps the regenerator functional on
     fresh vaults where dream-protocol has not yet run.
+
+    `vaults_config` is threaded through to `_build_system_alerts` so
+    the System Alerts section only ever references the caller-supplied
+    vaults-config path, never an ambient env var.
     """
     profile = _read_optional(client, SOURCE_PROFILE)
     status = _read_optional(client, SOURCE_STATUS)
@@ -334,7 +349,7 @@ def _build_regenerated_sections(client, vault_path: Optional[Path] = None) -> Di
     }
 
     # System Alerts: populated when critical health issues exist, omitted when clean.
-    alerts_body = _build_system_alerts(vault_path)
+    alerts_body = _build_system_alerts(vault_path, vaults_config=vaults_config)
     if alerts_body:
         sections["System Alerts"] = alerts_body
 
@@ -345,13 +360,21 @@ def _build_regenerated_sections(client, vault_path: Optional[Path] = None) -> Di
 # Mode implementations
 # ---------------------------------------------------------------------------
 
-def _run_regenerate(client, vault_path: Optional[Path] = None) -> int:
+def _run_regenerate(
+    client,
+    vault_path: Optional[Path] = None,
+    vaults_config: Optional[Path] = None,
+) -> int:
     """Build + validate + write a fresh hot-memory.md.
 
     Returns 0 on success, 1 on validation failure. Network errors
     propagate to `main` as ConnectMCPError subclasses and are handled there.
     """
-    sections = _build_regenerated_sections(client, vault_path=vault_path)
+    sections = _build_regenerated_sections(
+        client,
+        vault_path=vault_path,
+        vaults_config=vaults_config,
+    )
     doc = assemble_document(
         sections,
         generated_by="update_hot_memory.py --regenerate",
@@ -564,6 +587,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--api-key",
         help="Explicit Obsidian MCP API key override.",
     )
+    parser.add_argument(
+        "--vaults-config",
+        help=(
+            "Explicit path to secondbrain's vaults.json. If omitted, "
+            "defaults to the canonical ~/.config/secondbrain/vaults.json. "
+            "This is deliberately NOT resolved from SECONDBRAIN_VAULTS_CONFIG "
+            "— production always uses the canonical path, and tests pass "
+            "their scratch path explicitly so ambient env state cannot "
+            "leak into regenerated hot-memory.md alerts."
+        ),
+    )
     return parser
 
 
@@ -607,9 +641,22 @@ def main(
         sys.stderr.write("error: Connect MCP error: " + str(exc) + "\n")
         return 1
 
+    # Resolve vaults_config upfront and pass it explicitly. Default is the
+    # canonical config path, NOT resolve_vaults_config_path() (which honors
+    # SECONDBRAIN_VAULTS_CONFIG). Production always uses the canonical path;
+    # tests override via --vaults-config.
+    if args.vaults_config:
+        vaults_config = Path(args.vaults_config).expanduser()
+    else:
+        vaults_config = Path.home() / ".config" / "secondbrain" / "vaults.json"
+
     try:
         if args.regenerate:
-            return _run_regenerate(client, vault_path=Path(args.vault) if args.vault else None)
+            return _run_regenerate(
+                client,
+                vault_path=Path(args.vault) if args.vault else None,
+                vaults_config=vaults_config,
+            )
         return _run_apply(client, Path(args.apply))
     except ConnectMCPUnreachable as exc:
         sys.stderr.write("error: Connect MCP unreachable: " + str(exc) + "\n")
