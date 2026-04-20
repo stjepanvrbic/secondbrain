@@ -5,7 +5,7 @@ description: >
   health repair: verification, canonical link repairs, entity stub creation,
   manifest rebuild, and hot-memory regeneration until the vault verifies clean.
 metadata:
-  version: "3.6.0"
+  version: "3.6.1"
 ---
 
 # Core Rule
