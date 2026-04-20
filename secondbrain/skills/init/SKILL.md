@@ -12,7 +12,7 @@ description: >
   Supports a `--verify` mode that runs verification only (no creates,
   no installs) for diagnosing existing installs.
 metadata:
-  version: "3.5.26"
+  version: "3.6.0"
 ---
 
 # Core Rule
@@ -493,121 +493,19 @@ If the script reports `applicable: false`, continue — that just means init is 
 
 ---
 
-# Step 4a — Vault git tracking
+# Step 4a — Vault git tracking (REMOVED)
 
-**This step runs for ALL scenarios (fresh, connect, import).** After the vault is scaffolded and before scheduled tasks are installed, offer the user local git tracking for the vault. Git gives them per-turn commits they can review, and enables `/secondbrain:undo-last-turn` to roll back a single agent turn. It stays LOCAL unless the user also opts into a remote.
+Vault git versioning was removed in v3.6. The plugin trusts external backup
+(Syncthing + Google Drive) for durability and rollback; it no longer commits
+to the vault, initializes `.git`, or installs a Stop-hook commit. Skip
+straight to Step 5 — there is no git prompt.
 
-## 4a.1 Ask about local git
-
-Print this prompt verbatim and wait for a yes/no answer:
-
-```
-I'd like to put your vault under version control with git. This means:
-  - Every change the agent makes becomes a commit you can review
-  - You can roll back any single agent turn with /secondbrain:undo-last-turn
-  - This stays LOCAL to your machine — I will NOT push anywhere automatically
-
-This works alongside iCloud / Dropbox / Obsidian Sync but they sometimes
-fight each other. If you sync your vault, say "no" and I'll skip git for now.
-
-OK to enable git? (yes/no)
-```
-
-- If the user says **no**: print `Skipping git tracking — you can enable it later with /secondbrain:doctor.` and jump to Step 5. Do not block init.
-- If the user says **yes**: continue to 4a.2.
-
-## 4a.2 Initialize git in the vault
-
-Invoke the vault_git helper:
-
-```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vault_git.py init --vault "${VAULT_PATH}"
-```
-
-Capture stdout. If the result mentions `already a git repo`, print `Git was already set up — skipping.` and continue to 4a.3 (the user may still want to add a remote to an existing repo).
-
-If init fails, print the error and ask the user to resolve it (most likely: `git` is not on PATH). Do not advance until the user either fixes it or chooses to skip git entirely.
-
-After init succeeds, also write the default `.gitignore` and initial commit via the same helper — the library-level `setup_git` function handles this idempotently:
-
-```bash
-python3 -c "import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/scripts'); from setup_steps import setup_git; from pathlib import Path; r = setup_git(Path('${VAULT_PATH}')); print(r.message); sys.exit(0 if r.success else 1)"
-```
-
-Print the message and verify success before continuing.
-
-## 4a.3 Ask about a remote
-
-Print this prompt verbatim:
-
-```
-Do you also want to push your vault to a remote git repository for
-cross-device sync? You'll need to set this up yourself outside Obsidian
-(GitHub, GitLab, your own git server). I'll only push to the URL you
-give me, and only if you confirm.
-
-Enable remote push? (yes/no)
-```
-
-- If **no**: persist `with_push=false` via 4a.5 and jump to Step 5.
-- If **yes**: continue to 4a.4.
-
-## 4a.4 Collect and validate the remote URL
-
-Ask for the URL:
-
-```
-What's the remote URL? (e.g., git@github.com:user/my-vault.git or
-https://github.com/user/my-vault.git)
-```
-
-Validate the URL shape. A valid git remote URL starts with one of:
-- `git@` (SSH shorthand, e.g., `git@github.com:user/repo.git`)
-- `https://` (HTTPS with optional auth)
-- `ssh://` (explicit SSH)
-- `file://` (local bare repo, primarily for tests)
-
-If the URL doesn't match any of those prefixes, re-ask until it does. Do not proceed with a URL that failed validation — an unvalidated URL is the exact failure mode the Forbidden Action below is designed to prevent.
-
-Once validated, add the remote and push:
-
-```bash
-git -C "${VAULT_PATH}" remote add origin "<url>"
-git -C "${VAULT_PATH}" push -u origin HEAD
-```
-
-If `git remote add` fails because origin already exists, print the existing URL and ask the user whether to overwrite. If they say yes: `git -C "${VAULT_PATH}" remote set-url origin "<url>"`, then retry the push.
-
-If `git push` fails (wrong permissions, remote doesn't exist yet, network down, etc.), print the error verbatim and ask how to proceed:
-
-```
-The push failed:
-
-  <error output>
-
-What do you want to do?
-  1. Retry (I'll run the push again)
-  2. Skip remote (keep local git, forget the remote URL)
-  3. Abort git (remove local git entirely)
-
-Which one? (1, 2, or 3)
-```
-
-- **1 (retry)**: re-run `git -C "${VAULT_PATH}" push -u origin HEAD` and loop back to this prompt on failure.
-- **2 (skip remote)**: run `git -C "${VAULT_PATH}" remote remove origin` and jump to 4a.5 with `with_push=false`.
-- **3 (abort git)**: leave the repo alone (the user can clean it up with `rm -rf ${VAULT_PATH}/.git` if they really want to undo everything), but persist `with_push=false` and jump to Step 5.
-
-## 4a.5 Persist the with_push flag in vaults.json
-
-Whether or not the user enabled a remote, record the final `with_push` value in `~/.config/secondbrain/vaults.json` so T9's Stop hook knows whether to push after every commit:
-
-```bash
-python3 -c "import sys; sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}/scripts'); from setup_steps import register_vault_from_marker; from pathlib import Path; r = register_vault_from_marker(Path('${VAULT_PATH}'), with_push=${WITH_PUSH}); print(r.message); sys.exit(0 if r.success else 1)"
-```
-
-Where `${WITH_PUSH}` is the literal Python boolean `True` or `False`. This helper is the partial-init recovery path: it reconstructs the vaults.json entry from `${VAULT_PATH}/.secondbrain-installed` when the config is missing, and still acts as a simple idempotent update on re-runs.
-
-Print: `Git tracking enabled (remote: yes/no, auto-push: yes/no).`
+The old flow asked about local git, wrote a `.gitignore`, took an initial
+commit, and optionally configured a remote. If a vault still has a `.git`
+directory from a pre-v3.6 install and you want to reclaim the disk space, run
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/reclaim_vault_git_space.py --vault
+"${VAULT_PATH}" --confirm`. The plugin does not do this silently — it is
+always user-initiated.
 
 ---
 
@@ -987,7 +885,7 @@ If any check fails, print the failing line in red with a specific fix command. D
 
 Every step in the full setup flow must check current state before acting:
 - Step 4 never overwrites existing files
-- Step 4a detects an existing git repo and skips re-init; `setup_git` handles the `.gitignore` and initial-commit steps idempotently; the with_push persistence is an add-or-update into vaults.json that collapses to a no-op if the flag is already correct
+- Step 4a is obsolete (vault git versioning was removed in v3.6); the step is skipped entirely, leaving `with_push` unused in vaults.json and irrelevant to the install flow
 - Step 5 uses `CronList` to detect already-installed tasks and skips them
 - Step 6 only re-prompts if `me/profile.md` still has placeholder content
 - Steps 7-10 are inherently idempotent (verification + dream-protocol + doctor)
@@ -1016,9 +914,9 @@ Every step has fallback behavior:
 
 # Implementation Notes
 
-- The step flow (Steps 0-10, plus Step 4a) is sequential — don't parallelize. The user's mental model is "I'm being walked through setup," which requires one thing at a time.
+- The step flow (Steps 0-10) is sequential — don't parallelize. The user's mental model is "I'm being walked through setup," which requires one thing at a time. (Step 4a in the paper trail is obsolete and is skipped — see its inline note.)
 - Wait for explicit user confirmation between steps. Don't barrel through without acknowledgment.
 - When asking the user to do something in Obsidian's UI, describe the click path with as much detail as possible (corner of screen, button label, etc.) — assume they've never used Obsidian before.
 - All `cron` strings are 5-field standard cron (`M H DoM Mon DoW`), as `CronCreate` expects.
 - For Cowork, the vault path detection is best-effort. If you can't auto-detect the workspace, ask the user where Cowork is allowed to read from.
-- Step 4a delegates git work to `secondbrain/scripts/vault_git.py` (low-level primitives) and `secondbrain/scripts/setup_steps.py::setup_git` (the idempotent composition of init + gitignore + initial commit + optional remote + optional push). Never shell out directly to `git` from the skill except where Step 4a explicitly documents it for remote add/push — otherwise you lose the `StepResult` reporting that doctor and the init report both depend on.
+- Step 4a is obsolete. Do not call `vault_git.py` (removed), `setup_steps.setup_git` (removed), or any variant of `git init`/`git commit` against the vault during init. If a user still has a legacy `.git` in their vault, point them at `scripts/reclaim_vault_git_space.py`.

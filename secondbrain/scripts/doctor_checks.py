@@ -1128,6 +1128,159 @@ def check_log_md_exists(vault_path: Path) -> CheckResult:
     )
 
 
+# Matcher for the legacy `session-activity | checkpoint` entries that a prior
+# version of the SessionStart hook appended once per session. See
+# scripts/cleanup_session_activity_spam.py for the cleanup utility.
+_SESSION_ACTIVITY_RE = re.compile(
+    r"^## \[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] session-activity \| checkpoint\s*$",
+    re.MULTILINE,
+)
+
+_LOG_SIZE_WARN_BYTES = 10 * 1024 * 1024
+_LOG_SPAM_WARN_COUNT = 1000
+
+
+_LEGACY_GIT_WARN_BYTES = 1 * 1024 * 1024 * 1024  # 1 GB
+
+
+def _dir_size_bytes(path: Path) -> int:
+    """Sum `stat().st_size` for every file under `path`.
+
+    Used to weigh a legacy `.git` directory without shelling out to `du` —
+    some environments restrict `du`, and this is cheap enough for a doctor
+    check on a one-time basis. Errors on individual files are ignored: we
+    just want an order-of-magnitude number.
+    """
+    total = 0
+    for child in path.rglob("*"):
+        try:
+            if child.is_file():
+                total += child.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def check_vault_git_legacy(vault_path: Path) -> CheckResult:
+    """Check: warn if `<vault>/.git` exists and looks large.
+
+    Vault git versioning was removed in v3.6 — external backup (Syncthing
+    / Drive) handles durability. Installs from v3.5 and earlier may still
+    have a `.git` inside the vault, which can grow unbounded (the plugin
+    committed every Stop hook). This check surfaces that so the user can
+    reclaim the space via `scripts/reclaim_vault_git_space.py` — with
+    confirmation. Doctor never deletes data on its own.
+    """
+    git_dir = vault_path / ".git"
+    if not git_dir.exists():
+        return CheckResult(
+            name="vault_git_legacy",
+            status="pass",
+            message="vault has no legacy .git directory",
+            fixable=False,
+        )
+
+    size = _dir_size_bytes(git_dir)
+    gb = size / (1024 ** 3)
+
+    if size < _LEGACY_GIT_WARN_BYTES:
+        return CheckResult(
+            name="vault_git_legacy",
+            status="warning",
+            message=(
+                f"vault has a legacy .git directory ({gb:.2f} GB). Vault git "
+                "versioning was removed in v3.6 — Syncthing/Drive owns backup "
+                "now. You can reclaim the space with "
+                "`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/reclaim_vault_git_space.py "
+                "--vault \"${VAULT_PATH}\" --confirm`."
+            ),
+            fixable=False,
+            details={"size_bytes": size},
+        )
+
+    return CheckResult(
+        name="vault_git_legacy",
+        status="warning",
+        message=(
+            f"vault .git is HUGE ({gb:.1f} GB) — this is the source of the "
+            "slow vault tooling you've been seeing. Vault git versioning was "
+            "removed in v3.6. Reclaim the space with "
+            "`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/reclaim_vault_git_space.py "
+            "--vault \"${VAULT_PATH}\" --confirm`."
+        ),
+        fixable=False,
+        details={"size_bytes": size},
+    )
+
+
+def check_log_md_bloat(vault_path: Path) -> CheckResult:
+    """Check 9b: log.md isn't pathologically large from legacy spam entries.
+
+    Warns when log.md is either >10 MB or contains >1,000 legacy
+    `session-activity | checkpoint` entries. Both signal that the
+    cleanup utility should run. Never auto-applied — the user's log is
+    their data, so doctor offers the cleanup during treatment rather
+    than silently modifying it.
+    """
+    log = vault_path / "log.md"
+    if not log.is_file():
+        return CheckResult(
+            name="log_md_bloat",
+            status="pass",
+            message="log.md not present; nothing to check",
+            fixable=False,
+        )
+
+    try:
+        size = log.stat().st_size
+    except OSError as exc:
+        return CheckResult(
+            name="log_md_bloat",
+            status="warning",
+            message=f"could not stat {log}: {exc}",
+            fixable=False,
+        )
+
+    matches = 0
+    if size > 0:
+        try:
+            with log.open("r", encoding="utf-8", errors="replace") as fh:
+                matches = sum(1 for _ in _SESSION_ACTIVITY_RE.finditer(fh.read()))
+        except OSError as exc:
+            return CheckResult(
+                name="log_md_bloat",
+                status="warning",
+                message=f"could not read {log}: {exc}",
+                fixable=False,
+            )
+
+    if size < _LOG_SIZE_WARN_BYTES and matches < _LOG_SPAM_WARN_COUNT:
+        return CheckResult(
+            name="log_md_bloat",
+            status="pass",
+            message=(
+                f"log.md is healthy ({size / 1024:.0f} KB, {matches} legacy "
+                "spam entries)"
+            ),
+            fixable=False,
+        )
+
+    mb = size / (1024 * 1024)
+    return CheckResult(
+        name="log_md_bloat",
+        status="warning",
+        message=(
+            f"log.md is bloated ({mb:.1f} MB, {matches} legacy "
+            "`session-activity | checkpoint` entries). Doctor can clean "
+            "these up via cleanup_session_activity_spam — your real log "
+            "entries are preserved."
+        ),
+        fixable=True,
+        fix_function="cleanup_session_activity_spam",
+        details={"size_bytes": size, "spam_matches": matches},
+    )
+
+
 def check_profile_has_user_content(vault_path: Path) -> CheckResult:
     """Check 10: `me/profile.md` contains real content, not `{{PLACEHOLDER}}`."""
     profile = vault_path / "me" / "profile.md"
@@ -2136,7 +2289,8 @@ def run_all_checks(
         # emitted here as a fail — otherwise callers that index results by
         # name will see a ragged shape between healthy and broken vaults.
         for name in (
-            "manifest", "log_md", "profile", "standard_folders",
+            "manifest", "log_md", "log_md_bloat", "vault_git_legacy", "profile",
+            "standard_folders",
             "scheduled_tasks", "last_dream_protocol_run",
             "hot_memory_schema", "cowork_memory_hygiene", "ingest_log_recent_failures",
             "vault_verification", "legacy_claude_md", "plugin_version_mismatch",
@@ -2150,6 +2304,8 @@ def run_all_checks(
     else:
         results.append(check_manifest_exists(vault_path))
         results.append(check_log_md_exists(vault_path))
+        results.append(check_log_md_bloat(vault_path))
+        results.append(check_vault_git_legacy(vault_path))
         results.append(check_profile_has_user_content(vault_path))
         results.append(check_standard_folders(vault_path))
 

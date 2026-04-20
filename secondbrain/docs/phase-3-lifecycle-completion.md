@@ -4,6 +4,13 @@
 > v3.5.0. NOT loaded by the agent. Audience: future maintainers reasoning
 > about `setup_steps.py`, the Stop hook, the ingest subagent, or the
 > hot-memory flow.
+>
+> **v3.6 update:** the git-tracked-vault piece of Phase 2 was removed.
+> `scripts/vault_git.py`, the `undo-last-turn` skill, dream-protocol
+> Phase 6 commit, and the Stop hook commit were all deleted. External
+> backup (Syncthing + Drive) replaces them. References below are kept
+> as a historical record — see `scripts/reclaim_vault_git_space.py` for
+> the migration path.
 
 ## What the redesign delivered
 

@@ -122,34 +122,70 @@ def _read_optional(client, path: str) -> Optional[str]:
 def _snippet_from_profile(raw: Optional[str]) -> str:
     """Identity & User Snapshot from me/profile.md.
 
-    Strips frontmatter (naively — drops lines between the first pair of
-    '---' delimiters) and returns the first few non-empty content lines.
-    This is deliberately a minimal summary; the ingest subagent is the
-    smart one and can overwrite it later. All we need is a valid body.
+    Strategy:
+      1. Strip frontmatter (between the first pair of `---` delimiters).
+      2. If the body contains a `## Snapshot` heading, return ITS section body
+         (stop at the next `## `). This is the preferred path — the user
+         controls what goes here, and the section is expressly meant for
+         session-start context.
+      3. Fall back to the first 3 non-empty, non-heading content lines.
+         Headings alone (`# Profile`, `## Work`) were producing useless
+         snippets in the old behavior.
+      4. Empty profile → placeholder the user can action on.
     """
     if not raw:
         return "_No profile yet. Add me/profile.md so the agent knows who you are._"
 
-    cleaned: List[str] = []
+    # Step 1: strip frontmatter.
+    body_lines: List[str] = []
     in_frontmatter = raw.lstrip().startswith("---")
     frontmatter_open_seen = False
     for line in raw.splitlines():
-        stripped = line.rstrip()
         if in_frontmatter:
-            if stripped == "---":
+            if line.rstrip() == "---":
                 if not frontmatter_open_seen:
                     frontmatter_open_seen = True
                     continue
                 in_frontmatter = False
                 continue
             continue
-        if stripped:
-            cleaned.append(stripped)
+        body_lines.append(line)
+
+    # Step 2: prefer an explicit `## Snapshot` section if present.
+    snapshot: List[str] = []
+    in_snapshot = False
+    for line in body_lines:
+        stripped = line.strip()
+        if in_snapshot:
+            if stripped.startswith("## "):
+                break
+            if stripped:
+                snapshot.append(stripped)
+            continue
+        if stripped.lower() == "## snapshot":
+            in_snapshot = True
+    if snapshot:
+        return "\n".join(snapshot)
+
+    # Step 3: fallback — first 3 non-empty, non-heading content lines.
+    cleaned: List[str] = []
+    for line in body_lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            continue
+        cleaned.append(stripped)
+        if len(cleaned) >= 3:
+            break
 
     if not cleaned:
-        return "_profile present but empty_"
-    # Take up to the first 3 non-empty content lines as a snippet.
-    return "\n".join(cleaned[:3])
+        return (
+            "_profile present but has no `## Snapshot` section and no plain "
+            "body text. Add a `## Snapshot` section to me/profile.md with a "
+            "few lines about who you are, your focus, and your preferences._"
+        )
+    return "\n".join(cleaned)
 
 
 def _identity_section() -> str:

@@ -8,7 +8,7 @@ description: >
   reports results, and ONLY on the user's next-turn confirmation invokes
   the treatment phase (Phase 2) for bootstrap fixes. Phase 1 never mutates anything.
 metadata:
-  version: "3.5.26"
+  version: "3.6.0"
 ---
 
 # Core Rule
@@ -122,6 +122,13 @@ question, and then **STOP**.
 |-------|--------------|
 | `manifest` (Check 8, `_MANIFEST.md` missing) | `rebuild_manifest` |
 | `log_md` (Check 9, `log.md` missing) | `create_log_md` |
+| `log_md_bloat` (Check 9b, legacy `session-activity \| checkpoint` spam in log.md) | `cleanup_session_activity_spam` |
+
+Escalation table additions:
+
+| Check | Escalation |
+|-------|-----------|
+| `vault_git_legacy` (warning — legacy `<vault>/.git` from pre-v3.6 installs) | run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/reclaim_vault_git_space.py --vault "${VAULT_PATH}" --confirm` to reclaim disk space. Vault git versioning was removed in v3.6. |
 | `profile` (Check 10, placeholders or missing) | `setup_profile` |
 | `standard_folders` (Check 11, folders missing) | `setup_vault_scaffolding` |
 | `vault_identity_cross` (marker present but missing `vault_id` field) | `write_vault_id` |

@@ -1,7 +1,7 @@
 """Tests for validate_hot_memory.py — CLI wrapper around hot_memory_schema.validate().
 
-Runs the script as a real subprocess (same pattern as test_vault_git.py) so
-stdout/stderr/exit-code contracts are exercised end-to-end.
+Runs the script as a real subprocess so stdout/stderr/exit-code contracts
+are exercised end-to-end.
 """
 
 from __future__ import annotations

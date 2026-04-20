@@ -11,6 +11,29 @@
 
 ---
 
+## Phase 0 — Log Hygiene (precondition)
+
+Before reading or appending to `log.md`, auto-heal severe bloat from the
+legacy `session-activity | checkpoint` spam a prior SessionStart hook
+emitted. Threshold: 10,000 matches — below that, leave the log alone and
+let `/secondbrain:doctor` surface it to the user.
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/cleanup_session_activity_spam.py \
+    --vault "${VAULT_PATH}" \
+    --threshold 10000
+```
+
+The script is idempotent and stdlib-only. Below the threshold it exits 0
+without writing. Above it, it strips the matching entries and prints the
+count removed. On any write, append a single log entry:
+
+```
+## [YYYY-MM-DD HH:MM] dream-protocol | log-cleanup | removed N legacy entries
+```
+
+---
+
 ## Phase 1 — Orient
 
 Read vault state before touching anything. Understand what exists and what changed since the last dream run.

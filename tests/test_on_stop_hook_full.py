@@ -362,9 +362,10 @@ class TestDispatchGatedByNewTurnCount:
 
     def test_four_completed_exchanges_no_dispatch(self, scratch: Path):
         vault = _make_vault_in_scratch(scratch)
-        _init_vault_as_git_repo(vault)
-        # Dirty change so the commit path fires — we want to prove that
-        # T9 behavior still runs even when the batched dispatch gets skipped.
+        # Dirty change exists, but vault git versioning was removed in v3.6 —
+        # the Stop hook no longer commits. This test only proves that the
+        # ingester dispatch is gated off when there are <5 completed
+        # exchanges since the cursor.
         (vault / "brain" / "new.md").write_text("# dirty\n")
 
         transcript = scratch / "tx.jsonl"
@@ -393,12 +394,6 @@ class TestDispatchGatedByNewTurnCount:
             path_with_claude=bin_dir,
         )
         assert code == 0
-
-        # Commit still happened (T9 behavior preserved).
-        cp = _git("rev-list", "--count", "HEAD", cwd=vault)
-        assert int(cp.stdout.strip()) >= 2, (
-            "T9 commit must still happen even when the batched dispatch is skipped"
-        )
 
         assert not claude_log.exists() or claude_log.read_text() == "", (
             "sub-threshold stop case must NOT invoke `claude`; "
@@ -456,12 +451,11 @@ class TestSkipDispatchEnvVar:
 
 class TestClaudeCliMissingOnPath:
     """If `claude` isn't on PATH (e.g., plugin is installed on a server
-    with no CLI), the hook must still exit 0 and commit — dispatch is
-    best-effort, not mandatory."""
+    with no CLI), the hook must still exit 0 — dispatch is best-effort,
+    not mandatory."""
 
     def test_missing_claude_cli_does_not_wedge(self, scratch: Path):
         vault = _make_vault_in_scratch(scratch)
-        _init_vault_as_git_repo(vault)
         (vault / "brain" / "new.md").write_text("# dirty\n")
 
         transcript = scratch / "tx.jsonl"
@@ -487,12 +481,6 @@ class TestClaudeCliMissingOnPath:
             path_with_claude=None,
         )
         assert code == 0
-
-        # The log should still exist (extract still ran + commit still
-        # logged), but no dispatch line should claim we succeeded in
-        # firing `claude`.
-        log_text = _ingest_log(vault)
-        assert log_text, "ingest-log.md should have T9 commit entry"
 
 
 class TestDispatchLoggedOnSuccess:

@@ -61,7 +61,6 @@ SANCTIONED_SCRIPTS = {
     "emit_hot_memory.py",
     "setup_steps.py",
     "init_obsidian.py",
-    "vault_git.py",
     "create_entity_stubs.py",
     "bump_version.py",
     "connect_mcp_client.py",

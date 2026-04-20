@@ -7,7 +7,7 @@ description: >
   Orchestrates a semantic worker followed by a structural worker so the vault
   ends the run in a fully healthy state.
 metadata:
-  version: "3.5.26"
+  version: "3.6.0"
 ---
 
 # Core Rule
@@ -109,30 +109,19 @@ Inbox: X processed. Session signal: X items extracted. Tasks: X archived, X prom
 
 This is append-only — never edit existing entries. The log.md format is documented in `@${CLAUDE_PLUGIN_ROOT}/references/vault-navigation.md`.
 
-# Phase 6 — Commit nightly state
-
-After Phase 5's log.md append, commit any uncommitted vault changes from the night's work as a single nightly checkpoint. This is the same `commit-stop` subcommand the Stop hook uses per turn, so the nightly commit is consistent with the per-turn commits in style and author identity.
+After appending the run entry, rotate entries older than 30 days into the monthly archive so log.md stays scannable:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vault_git.py commit-stop \
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rotate_log.py \
     --vault "${VAULT_PATH}" \
-    --message "dream-protocol nightly checkpoint"
+    --max-age-days 30
 ```
 
-**Git is opt-in.** If `vault_git.py` reports that the vault is not a git repo (exit non-zero with `not a git repo`), **skip silently** — the user opted out of git during init and the nightly run should not complain. Do not print an error, do not surface it to the user, and do not attempt to `vault_git.py init` on their behalf.
+The script is idempotent and stdlib-only; on the first run after upgrade it may move a large batch, subsequent runs are near-noops. Archive files land at `archive/log-YYYY-MM.md`.
 
-**Fail soft on real errors.** If `commit-stop` fails for any reason other than "not a git repo" (missing git binary, permission issue, file system weirdness, etc.), log the stderr verbatim to `log.md` as:
+# Phase 6 — Regenerate hot memory
 
-```markdown
-## [YYYY-MM-DD HH:MM] dream-protocol | commit-stop failed
-<captured stderr>
-```
-
-Then continue. dream-protocol should **never hard-fail** on a commit issue — the vault content is already on disk from Phases 1-5, so the night's work is durable regardless of whether the commit landed. Doctor or the next Stop hook invocation will retry the commit.
-
-# Phase 7 — Regenerate hot memory
-
-After Phase 6 (commit), regenerate `brain/hot-memory.md` from scratch
+After Phase 5's log.md append, regenerate `brain/hot-memory.md` from scratch
 based on the now-clean vault state:
 
 ```bash
@@ -158,11 +147,6 @@ single failed regenerate is a transient inconvenience, not data loss.
 ## [YYYY-MM-DD HH:MM] dream-protocol | hot-memory regenerate failed
 <captured stderr>
 ```
-
-Phase 7 runs after the commit so the regenerated hot-memory reflects
-the committed state on disk — if we regenerated before committing, the
-hot-memory would snapshot a state the user could never `git log` back
-to.
 
 After the regenerate step succeeds, refresh Cowork compatibility memory and
 quarantine any legacy `memex` leftovers when the run is happening inside a
