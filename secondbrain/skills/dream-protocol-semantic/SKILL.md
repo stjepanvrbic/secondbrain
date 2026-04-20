@@ -6,7 +6,7 @@ description: >
   completed tasks, and resolve contradictions in live state before
   structural verification begins.
 metadata:
-  version: "3.6.0"
+  version: "3.6.2"
 ---
 
 # Core Rule

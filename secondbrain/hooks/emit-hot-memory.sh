@@ -136,48 +136,60 @@ if [ ! -f "${EMITTER}" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# If hot-memory.md is older than 12h, kick off refresh_vault_indexes.py in the
-# background. Current session still emits the on-disk (possibly stale) file;
-# the next SessionStart picks up the fresh data. This decouples freshness
-# from dream-protocol — if dream fails, SessionStart self-heals.
+# Background maintenance spawns — GATED.
+#
+# These fire detached children (nohup + disown) that can outlive the hook.
+# Two safety gates protect the user's real vault:
+#
+#   1. SECONDBRAIN_SUPPRESS_BACKGROUND_REFRESH=1 skips both spawns entirely.
+#      Pytest sets this by default in _run_hook so test tempdirs never race
+#      with detached children — a bug that previously leaked a pytest path
+#      into a user's real hot-memory.md.
+#   2. `env -u SECONDBRAIN_VAULTS_CONFIG` strips the env override before
+#      running the child, so even if a pytest subprocess does opt in, the
+#      detached child resolves from the canonical ~/.config vaults.json
+#      instead of a scratch path that may be rmtree'd mid-run.
 # ---------------------------------------------------------------------------
 
-HOT_MEMORY="${ACTIVE_VAULT}/brain/hot-memory.md"
-REFRESH_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/refresh_vault_indexes.py"
-STALE_THRESHOLD_SEC=43200  # 12 hours
+if [ "${SECONDBRAIN_SUPPRESS_BACKGROUND_REFRESH:-0}" != "1" ]; then
 
-if [ -d "${ACTIVE_VAULT}" ] && [ -f "${REFRESH_SCRIPT}" ]; then
-    # stat -f uses BSD semantics (macOS); -c uses GNU (Linux). Try the BSD
-    # form first, fall back for Linux. Missing file → treat as "infinitely
-    # stale" so the first ever session triggers a regenerate.
-    if MTIME=$(stat -f %m "${HOT_MEMORY}" 2>/dev/null); then :
-    elif MTIME=$(stat -c %Y "${HOT_MEMORY}" 2>/dev/null); then :
-    else MTIME=0
+    # If hot-memory.md is older than 12h, kick off refresh_vault_indexes.py
+    # in the background. Current session still emits the on-disk (possibly
+    # stale) file; the next SessionStart picks up the fresh data. This
+    # decouples freshness from dream-protocol.
+    HOT_MEMORY="${ACTIVE_VAULT}/brain/hot-memory.md"
+    REFRESH_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/refresh_vault_indexes.py"
+    STALE_THRESHOLD_SEC=43200  # 12 hours
+
+    if [ -d "${ACTIVE_VAULT}" ] && [ -f "${REFRESH_SCRIPT}" ]; then
+        # stat -f uses BSD semantics (macOS); -c uses GNU (Linux). Missing
+        # file → treat as "infinitely stale".
+        if MTIME=$(stat -f %m "${HOT_MEMORY}" 2>/dev/null); then :
+        elif MTIME=$(stat -c %Y "${HOT_MEMORY}" 2>/dev/null); then :
+        else MTIME=0
+        fi
+        NOW=$(date +%s)
+        AGE=$((NOW - MTIME))
+        if [ "${AGE}" -gt "${STALE_THRESHOLD_SEC}" ]; then
+            nohup env -u SECONDBRAIN_VAULTS_CONFIG \
+                python3 "${REFRESH_SCRIPT}" --vault "${ACTIVE_VAULT}" \
+                >/dev/null 2>&1 &
+            disown 2>/dev/null || true
+        fi
     fi
-    NOW=$(date +%s)
-    AGE=$((NOW - MTIME))
-    if [ "${AGE}" -gt "${STALE_THRESHOLD_SEC}" ]; then
-        # Fully detached: stdout and stderr go to the ingest-log via the
-        # script itself, and we nohup + background so the hook returns
-        # immediately (SessionStart has a 10s budget).
-        nohup python3 "${REFRESH_SCRIPT}" --vault "${ACTIVE_VAULT}" \
+
+    # Belt-and-suspenders log rotation: if log.md is >10 MB, rotate in the
+    # background. Dream-protocol owns nightly age-based rotation; this guard
+    # protects users whose dream-protocol is broken.
+    ROTATE_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/rotate_log.py"
+    if [ -d "${ACTIVE_VAULT}" ] && [ -f "${ROTATE_SCRIPT}" ]; then
+        nohup env -u SECONDBRAIN_VAULTS_CONFIG \
+            python3 "${ROTATE_SCRIPT}" --vault "${ACTIVE_VAULT}" \
+            --max-age-days 30 --max-size-mb 10 \
             >/dev/null 2>&1 &
         disown 2>/dev/null || true
     fi
-fi
 
-# ---------------------------------------------------------------------------
-# Belt-and-suspenders log rotation: if log.md is >10 MB, kick off rotate_log
-# in the background. Dream-protocol owns the nightly age-based rotation;
-# this guard protects users whose dream-protocol is broken.
-# ---------------------------------------------------------------------------
-
-ROTATE_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/rotate_log.py"
-if [ -d "${ACTIVE_VAULT}" ] && [ -f "${ROTATE_SCRIPT}" ]; then
-    nohup python3 "${ROTATE_SCRIPT}" --vault "${ACTIVE_VAULT}" \
-        --max-age-days 30 --max-size-mb 10 \
-        >/dev/null 2>&1 &
-    disown 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------

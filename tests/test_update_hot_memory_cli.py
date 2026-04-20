@@ -340,12 +340,16 @@ class TestRuntimeResolution:
 
     def test_system_alerts_honor_vaults_config_override(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ):
+        # v3.6.2: _build_system_alerts no longer reads
+        # SECONDBRAIN_VAULTS_CONFIG — callers pass vaults_config explicitly,
+        # which closes the env-leak bug.
         config_path = tmp_path / "config" / "secondbrain" / "vaults.json"
-        monkeypatch.setenv("SECONDBRAIN_VAULTS_CONFIG", str(config_path))
-        text = update_hot_memory._build_system_alerts(tmp_path / "vault")
+        text = update_hot_memory._build_system_alerts(
+            tmp_path / "vault",
+            vaults_config=config_path,
+        )
         assert text is not None
         assert str(config_path) in text
 

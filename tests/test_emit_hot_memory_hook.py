@@ -86,6 +86,7 @@ def _run_hook(
     payload: dict,
     scratch: Path,
     vaults_config: Path | None = None,
+    allow_background_spawn: bool = False,
 ) -> Tuple[int, str, str]:
     env = os.environ.copy()
     env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
@@ -94,6 +95,11 @@ def _run_hook(
     else:
         # Point at a definitely-missing file so the hook falls back.
         env["SECONDBRAIN_VAULTS_CONFIG"] = str(scratch / "no-such-config.json")
+    # Suppress the background refresh + rotate spawns by default so pytest
+    # tempdir teardown cannot race with a detached child. Tests that want
+    # to exercise the background path pass allow_background_spawn=True.
+    if not allow_background_spawn:
+        env["SECONDBRAIN_SUPPRESS_BACKGROUND_REFRESH"] = "1"
     result = subprocess.run(
         [str(HOOK)],
         input=json.dumps(payload),
